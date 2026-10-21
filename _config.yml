@@ -1,0 +1,11 @@
+# GitHub Pages builds only the policy pages (index, privacy, terms); the code folders are skipped.
+title: Per Capita Maps Studio
+exclude:
+  - worker
+  - n8n
+  - sql
+  - music
+  - compose.pipeline.yml
+  - README.md
+  - .gitignore
+  - .dockerignore

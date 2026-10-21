@@ -1,0 +1,43 @@
+{
+  "name": "percapita-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Per Capita Maps render worker: data, scripts, voice, video, QA, Telegram bot",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "migrate": "tsx src/cli/migrate.ts",
+    "check-datasets": "tsx src/cli/check-datasets.ts",
+    "test-render": "tsx src/cli/test-render.ts",
+    "voice-test": "tsx src/cli/voice-test.ts",
+    "produce": "tsx src/cli/produce.ts",
+    "typecheck": "tsc --noEmit",
+    "seed-sql": "tsx src/cli/seed-sql.ts"
+  },
+  "dependencies": {
+    "@fontsource/inter": "5.2.8",
+    "@remotion/bundler": "4.0.537",
+    "@remotion/cli": "4.0.537",
+    "@remotion/renderer": "4.0.537",
+    "country-flag-icons": "1.6.20",
+    "d3-geo": "3.1.1",
+    "express": "5.1.0",
+    "i18n-iso-countries": "7.14.0",
+    "pg": "8.16.3",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.537",
+    "topojson-client": "3.1.0",
+    "tsx": "4.20.6",
+    "world-atlas": "2.0.2"
+  },
+  "devDependencies": {
+    "@types/d3-geo": "3.1.0",
+    "@types/express": "5.0.3",
+    "@types/node": "22.18.12",
+    "@types/pg": "8.15.5",
+    "@types/react": "19.2.2",
+    "@types/topojson-client": "3.1.5",
+    "typescript": "5.9.3"
+  }
+}

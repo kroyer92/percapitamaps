@@ -1,0 +1,253 @@
+{
+  "id": "CD9w3UbTOzuoItys",
+  "name": "WF3 Approved upload",
+  "nodes": [
+    {
+      "id": "588d1b9e-d3fa-960d-1b5c-791674587e8b",
+      "name": "Approved in Telegram",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "percapita-approved",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "8baa5f2a-829c-1150-5403-0b5bfd6db30e"
+    },
+    {
+      "id": "6a2f8800-c0dd-1166-5e0f-4e7f7b12042d",
+      "name": "Download video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "url": "={{ $json.body.file_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 300000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "872fe2a6-9d4f-d665-8b3e-29d95ccd5c8c",
+      "name": "Upload to YouTube",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "resource": "video",
+        "operation": "upload",
+        "title": "={{ $('Approved in Telegram').item.json.body.title }}",
+        "regionCode": "US",
+        "categoryId": "={{ $('Approved in Telegram').item.json.body.category_id }}",
+        "binaryProperty": "data",
+        "options": {
+          "description": "={{ $('Approved in Telegram').item.json.body.description }}",
+          "tags": "={{ $('Approved in Telegram').item.json.body.tags.join(',') }}",
+          "privacyStatus": "private",
+          "publishAt": "={{ $('Approved in Telegram').item.json.body.publish_at }}",
+          "selfDeclaredMadeForKids": false,
+          "defaultLanguage": "en",
+          "notifySubscribers": true
+        }
+      }
+    },
+    {
+      "id": "13854e05-081d-4157-9044-c62d5e8f8ec3",
+      "name": "Has playlist?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "3dc6a906-fc8d-db94-ea80-55d085104f86",
+              "leftValue": "={{ $('Approved in Telegram').item.json.body.playlist_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "46215cfe-0bb1-0a4b-b9e7-ee868f0e3b7d",
+      "name": "Add to playlist",
+      "type": "n8n-nodes-base.youTube",
+      "typeVersion": 1,
+      "position": [
+        960,
+        -80
+      ],
+      "parameters": {
+        "resource": "playlistItem",
+        "operation": "add",
+        "playlistId": "={{ $('Approved in Telegram').item.json.body.playlist_id }}",
+        "videoId": "={{ ($('Upload to YouTube').item.json.uploadId ?? $('Upload to YouTube').item.json.id) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a142db6f-6267-519f-7a2d-5d96a0871303",
+      "name": "Post the comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/youtube/v3/commentThreads?part=snippet",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ snippet: { videoId: ($('Upload to YouTube').item.json.uploadId ?? $('Upload to YouTube').item.json.id), topLevelComment: { snippet: { textOriginal: $('Approved in Telegram').item.json.body.pinned_comment } } } }) }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "094591f0-a1b5-562a-69b2-1ad0d5243fd6",
+      "name": "Tell the worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1440,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://render-worker:8080/jobs/{{ $('Approved in Telegram').item.json.body.job_id }}/youtube",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ video_id: ($('Upload to YouTube').item.json.uploadId ?? $('Upload to YouTube').item.json.id) }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Approved in Telegram": {
+      "main": [
+        [
+          {
+            "node": "Download video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download video": {
+      "main": [
+        [
+          {
+            "node": "Upload to YouTube",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to YouTube": {
+      "main": [
+        [
+          {
+            "node": "Has playlist?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has playlist?": {
+      "main": [
+        [
+          {
+            "node": "Add to playlist",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post the comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add to playlist": {
+      "main": [
+        [
+          {
+            "node": "Post the comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post the comment": {
+      "main": [
+        [
+          {
+            "node": "Tell the worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "errorWorkflow": "WaMuKb7OhPyHjGKs"
+  },
+  "pinData": {},
+  "tags": []
+}

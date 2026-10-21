@@ -1,0 +1,15 @@
+# Secrets and settings live only on the server.
+.env
+*.env
+!.env.example
+
+# Generated or downloaded
+node_modules/
+renders/
+music/*.mp3
+music/*.wav
+music/credits.json
+worker/bundle/
+worker/tmp-*
+*.log
+.DS_Store

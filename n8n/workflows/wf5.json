@@ -1,0 +1,231 @@
+{
+  "id": "kKETYuA2gwprbtZG",
+  "name": "WF5 Analyze",
+  "nodes": [
+    {
+      "id": "1f2f936a-7c84-8f2e-8d07-78e23ec06520",
+      "name": "Every 6 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "20 */6 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bf270a65-81d4-72da-4f35-ac52a3fc8cce",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        180
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "20130422-a562-0dfb-6615-90fe220020d9",
+      "name": "Videos due",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        80
+      ],
+      "parameters": {
+        "url": "http://render-worker:8080/analytics/due",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "alwaysOutputData": false
+    },
+    {
+      "id": "3d64234b-a204-f1cf-87e5-fecdd449a0b5",
+      "name": "Views and likes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        80
+      ],
+      "parameters": {
+        "url": "=https://www.googleapis.com/youtube/v3/videos?part=statistics&id={{ $json.video_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "063ade7e-fcef-85ba-316d-87a7f0ce8746",
+      "name": "Retention",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        80
+      ],
+      "parameters": {
+        "url": "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $('Videos due').item.json.start_date }}&endDate={{ $('Videos due').item.json.end_date }}&metrics=views,engagedViews,averageViewPercentage,averageViewDuration,likes,shares,comments,subscribersGained&filters=video=={{ $('Videos due').item.json.video_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "6acc23d5-b23f-3521-fbcc-416b7de43519",
+      "name": "Save snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://render-worker:8080/analytics/snapshot",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ job_id: $('Videos due').item.json.job_id, win: $('Videos due').item.json.win, stats: $('Views and likes').item.json, analytics: $json }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "51afafa7-2d52-1418-2732-f6c7830219cc",
+      "name": "Sunday 18:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        380
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 18 * * 0"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "e4a89e9f-8290-017a-f402-4e5cec855182",
+      "name": "Weekly report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        380
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://render-worker:8080/report/weekly",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Every 6 hours": {
+      "main": [
+        [
+          {
+            "node": "Videos due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Videos due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Videos due": {
+      "main": [
+        [
+          {
+            "node": "Views and likes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Views and likes": {
+      "main": [
+        [
+          {
+            "node": "Retention",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retention": {
+      "main": [
+        [
+          {
+            "node": "Save snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sunday 18:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "Weekly report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "errorWorkflow": "WaMuKb7OhPyHjGKs"
+  },
+  "pinData": {},
+  "tags": []
+}

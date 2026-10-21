@@ -1,0 +1,45 @@
+# The production pipeline, added to the base stack in /opt/percapita/docker-compose.yml.
+# Enabled by COMPOSE_FILE=docker-compose.yml:app/compose.pipeline.yml in /opt/percapita/.env,
+# so paths here are relative to /opt/percapita.
+services:
+  render-worker:
+    build:
+      context: ./app
+      dockerfile: worker/Dockerfile
+    image: percapita-worker:latest
+    restart: unless-stopped
+    depends_on: [postgres]
+    env_file: ./app/.env
+    environment:
+      RENDERS_DIR: /opt/percapita/renders
+      MUSIC_DIR: /opt/percapita/app/music
+    volumes:
+      - ./renders:/opt/percapita/renders
+      - ./public:/opt/percapita/public
+      - ./app/music:/opt/percapita/app/music:ro
+      - worker_models:/models
+    mem_limit: 3500m          # rendering never starves n8n or Postgres
+    shm_size: 1gb             # headless Chrome needs more than Docker's 64 MB default
+
+  # One-off: docker compose run --rm migrate
+  migrate:
+    build:
+      context: ./app
+      dockerfile: worker/Dockerfile
+    image: percapita-worker:latest
+    profiles: [tools]
+    depends_on: [postgres]
+    env_file: ./app/.env
+    volumes:
+      - worker_models:/models
+    command: ["npm", "run", "migrate"]
+
+  n8n:
+    environment:
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"   # lets WF0/WF2 read TELEGRAM_CHAT_ID
+    env_file: ./app/.env
+    volumes:
+      - ./app/n8n/workflows:/import/workflows:ro
+
+volumes:
+  worker_models: {}

@@ -1,0 +1,157 @@
+{
+  "id": "H8weXjZX9i6pJ0lU",
+  "name": "WF2 Produce",
+  "nodes": [
+    {
+      "id": "c65292e6-238d-fb5c-fab0-1543b7813a17",
+      "name": "Every day 07:00 and 15:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7,15 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "57957b40-3898-4a5b-0f80-9f146acbef0e",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        180
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "0adbe99e-1cb1-bd96-5f55-38aec16561d2",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        80
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "23190345-a539-745a-e05d-1cc76e4a631f",
+              "name": "batch",
+              "value": 1,
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0c276305-ce11-bcbb-7607-78312804f4bf",
+      "name": "Start production",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://render-worker:8080/produce",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ batch: $json.batch }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "a122ae8d-b80b-e412-914d-212558ec69af",
+      "name": "Worker unreachable",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        740,
+        180
+      ],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=⚠️ WF2 could not reach the render worker: {{ $json.error?.message ?? $json.message ?? \"no answer\" }}\nCheck it with: docker compose ps",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every day 07:00 and 15:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Start production",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start production": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Worker unreachable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "errorWorkflow": "WaMuKb7OhPyHjGKs"
+  },
+  "pinData": {},
+  "tags": []
+}

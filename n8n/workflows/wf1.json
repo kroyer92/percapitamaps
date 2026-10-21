@@ -1,0 +1,89 @@
+{
+  "id": "vjQSdD3S8zTC49yb",
+  "name": "WF1 Discover",
+  "nodes": [
+    {
+      "id": "2cda712b-5644-27d6-a258-3da850484ef1",
+      "name": "Every day 05:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 5 * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "65d5ad32-342a-4931-d88c-6688427b7ebb",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        180
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "f1b619cf-420e-230c-18cf-2c88282998cd",
+      "name": "Find new topics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        280,
+        80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://render-worker:8080/discover",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Every day 05:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "Find new topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Find new topics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "errorWorkflow": "WaMuKb7OhPyHjGKs"
+  },
+  "pinData": {},
+  "tags": []
+}
