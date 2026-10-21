@@ -34,7 +34,7 @@ n8n (schedules, YouTube credentials)          render-worker (this repo, worker/)
 | Start or update everything | `cd app && git pull && cd .. && docker compose up -d --build` |
 | Create tables, load and check datasets | `docker compose run --rm migrate` |
 | Queue the 10 launch concepts | `docker compose exec -T postgres psql -U percapita -d percapita < app/sql/seed_launch_concepts.sql` |
-| One test video | `docker compose exec render-worker npm run test-render -- --concept sheep` |
+| One test video | `docker compose exec render-worker npm run test-render -- --concept cattle` |
 | Voice samples | `docker compose exec render-worker npm run voice-test` |
 | Re-check datasets | `docker compose exec render-worker npm run check-datasets` |
 | Import n8n workflows | `docker compose exec n8n n8n import:workflow --separate --input=/import/workflows` |

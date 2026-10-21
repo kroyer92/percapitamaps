@@ -1,4 +1,4 @@
-// `npm run test-render -- --concept sheep`: one full video from live data, without Telegram
+// `npm run test-render -- --concept cattle`: one full video from live data, without Telegram
 // or the database queue. Writes renders/test-<concept>.mp4 and a .qa.json report.
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -14,7 +14,7 @@ import { runQa } from '../qa.js';
 import { pickVoice } from '../produce.js';
 import { arg } from './args.js';
 
-const key = arg('concept', 'sheep')!;
+const key = arg('concept', 'cattle')!;
 const concept = CONCEPTS.find((c) => c.key === key);
 if (!concept) {
   console.error(`Unknown concept "${key}". Pick one of: ${CONCEPTS.map((c) => c.key).join(', ')}`);

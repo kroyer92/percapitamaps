@@ -5,7 +5,7 @@ import type { Format } from '../config.js';
 export interface Concept { key: string; dataset: string; format: Format; question: string; twist: string; trend?: string }
 
 export const CONCEPTS: Concept[] = [
-  { key: 'sheep', dataset: 'owid_sheep_pc', format: 'MAP_REVEAL', question: 'Which countries have more sheep than people?', twist: "Everyone thinks it's only New Zealand; several countries have more sheep than people." },
+  { key: 'cattle', dataset: 'owid_cattle_pc', format: 'MAP_REVEAL', question: 'Which countries have more cows than people?', twist: 'A few countries have more cattle than people, and the leader has more than three per person.' },
   { key: 'height', dataset: 'owid_height_men', format: 'COUNTDOWN', question: 'Which country has the tallest men?', twist: 'The tallest people on Earth are not American; Europe dominates the top.' },
   { key: 'hours', dataset: 'owid_working_hours', format: 'MAP_REVEAL', question: 'Which country works the most hours a year?', twist: "Japan doesn't work the longest hours. Not even close." },
   { key: 'co2', dataset: 'owid_co2_pc', format: 'COUNTDOWN', question: 'Who emits the most CO₂ per person?', twist: 'Small rich states out-pollute the US and China per person.' },

@@ -3,7 +3,7 @@
 -- Safe to run twice. Concepts whose dataset failed the live check are skipped.
 INSERT INTO topics (dataset_id, question, expected_twist, format, priority, angle_hash, source, concept_key)
 SELECT v.* FROM (VALUES
-  ('owid_sheep_pc', 'Which countries have more sheep than people?', 'Everyone thinks it''s only New Zealand; several countries have more sheep than people.', 'MAP_REVEAL', 1000, '3f99c1e119548abd', 'launch', 'sheep'),
+  ('owid_cattle_pc', 'Which countries have more cows than people?', 'A few countries have more cattle than people, and the leader has more than three per person.', 'MAP_REVEAL', 1000, '79653ce3bf1434b5', 'launch', 'cattle'),
   ('owid_height_men', 'Which country has the tallest men?', 'The tallest people on Earth are not American; Europe dominates the top.', 'COUNTDOWN', 999, '880adf075c6d2c79', 'launch', 'height'),
   ('owid_working_hours', 'Which country works the most hours a year?', 'Japan doesn''t work the longest hours. Not even close.', 'MAP_REVEAL', 998, '37e50b439b1759d4', 'launch', 'hours'),
   ('owid_co2_pc', 'Who emits the most CO₂ per person?', 'Small rich states out-pollute the US and China per person.', 'COUNTDOWN', 997, '03442def85253be9', 'launch', 'co2'),
