@@ -32,7 +32,7 @@ export function wordCount(s: string): number {
 const BANNED = [/\bsubscribe\b/i, /\bfollow (us|me|for)\b/i, /did you know/i, /let'?s dive in/i, /\bsmash\b/i, /that'?s (the|our) (full )?list/i, /now you know/i];
 
 // The #1 country and its value: the payoff, so they must stay out of the hook and the first two thirds.
-export interface Spoiler { name: string; value: string }
+export interface Spoiler { name: string; value: string; iso3: string }
 
 export function spoils(text: string, sp?: Spoiler): boolean {
   if (!sp) return false;
@@ -63,14 +63,20 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
     if (w > 12) errors.push(`Beat ${i + 1} has ${w} spoken words; max 8.`);
     if (i === 0 && w > 10) errors.push(`The hook (beat 1) has ${w} words; max 9.`);
     for (const re of BANNED) if (re.test(b.vo) || re.test(b.on_screen ?? '')) errors.push(`Beat ${i + 1} uses a banned phrase (${re.source}).`);
-    if (i < Math.floor((beats.length * 2) / 3) && spoils(`${b.vo} ${b.on_screen ?? ''}`, spoiler))
+    const early = i < Math.floor((beats.length * 2) / 3);
+    if (early && spoils(`${b.vo} ${b.on_screen ?? ''}`, spoiler))
       errors.push(`Beat ${i + 1} gives away the answer (${spoiler!.name} / ${spoiler!.value}). Save it for the final third.`);
+    if (early && spoiler && (b.visual ?? '').endsWith(`:${spoiler.iso3}`))
+      errors.push(`Beat ${i + 1} shows ${spoiler.name} on screen too early. Show it only in the final third.`);
     const twin = beats.findIndex((o, j) => j < i && o.vo && similar(o.vo, b.vo));
     if (twin >= 0) errors.push(`Beat ${i + 1} repeats beat ${twin + 1}. Say something new.`);
     for (const n of [...numbersIn(b.vo), ...numbersIn(b.on_screen ?? '')]) {
       if (!allowed.has(n)) errors.push(`Beat ${i + 1} uses the number ${n}, which is not in FACTS. Copy numbers exactly from FACTS.`);
     }
   });
+  // The payoff must land: the #1 is named out loud in the final third.
+  if (spoiler && beats.length && !beats.slice(Math.floor((beats.length * 2) / 3)).some((b) => (b.vo ?? '').toLowerCase().includes(spoiler.name.toLowerCase())))
+    errors.push(`The final third never names the answer. Say "${spoiler.name}" and its value ${spoiler.value} near the end.`);
   return errors;
 }
 

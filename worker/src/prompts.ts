@@ -49,7 +49,7 @@ ${twist ? `EXPECTED TWIST (from the planner; if FACTS don't support it, build th
 Rules:
 - Total spoken words between ${words[0]} and ${words[1]}.
 - Beat 1 is the hook: max 9 words, starts mid-thought, and creates a gap only the ending closes. It must NOT name the #1 country or its value.
-- Do not name the #1 country or say its value before the final third. Build up to it.
+- Do not name, zoom to or highlight the #1 country, or say its value, before the final third. Build up to it, then name it clearly with its value near the end.
 - No beat longer than 8 spoken words. Every beat names a visual change.
 - By beat 3, state what most people would guess, so the twist has something to break.
 - Every beat adds a new fact or contrast. Never repeat or rephrase an earlier beat.

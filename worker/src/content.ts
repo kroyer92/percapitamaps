@@ -35,7 +35,7 @@ export class NeedsHuman extends Error {
 
 export function wordsFor(band?: string): [number, number] {
   const m = band?.match(/^(\d+)-(\d+)$/);
-  const [lo, hi] = m ? [Number(m[1]), Number(m[2])] : [22, 40];
+  const [lo, hi] = m ? [Number(m[1]), Number(m[2])] : [28, 40];
   return [Math.round(lo * 2.7), Math.round(hi * 2.7)];
 }
 
@@ -86,7 +86,7 @@ export async function generateContent(opts: {
   const words = wordsFor(opts.lengthBand);
   // SCALE has no single winner to hide.
   const top = facts.ranking[0];
-  const spoiler: Spoiler | undefined = format !== 'SCALE' && top ? { name: top.name, value: top.display } : undefined;
+  const spoiler: Spoiler | undefined = format !== 'SCALE' && top ? { name: top.name, value: top.display, iso3: top.iso3 } : undefined;
 
   let fixHint: string | undefined;
   for (let round = 0; round < 2; round++) {
