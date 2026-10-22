@@ -199,7 +199,6 @@ export const CATALOG: CatalogEntry[] = [
   { id: 'wb_rail_lines', title: 'Railway length', unit: 'kilometres of track', topic: 'places', grp: 'transport', ref: wb('IS.RRS.TOTL.KM'), sourceName: 'World Bank WDI', license: WB_LIC, additive: true, minCountries: 40 },
   { id: 'wb_container_traffic', title: 'Shipping containers handled in ports', unit: 'containers (TEU) a year', topic: 'places', grp: 'transport', ref: wb('IS.SHP.GOOD.TU'), sourceName: 'World Bank WDI / UNCTAD', license: WB_LIC, additive: true, minCountries: 60 },
   { id: 'owid_ev_share', title: 'New cars that are electric', unit: 'percent of new car sales', topic: 'tech', grp: 'transport', ref: owid('electric-car-sales-share'), sourceName: 'Our World in Data / IEA', license: OWID_LIC, decimals: 0, suffix: '%', minCountries: 25 },
-  { id: 'owid_ai_investment', title: 'Private investment in AI', unit: 'dollars a year', topic: 'tech', grp: 'science', ref: owid('private-investment-in-artificial-intelligence'), sourceName: 'Our World in Data / Quid via AI Index', license: OWID_LIC, prefix: '$', additive: true, minCountries: 20 },
   { id: 'owid_space_objects', title: 'Objects launched into space', unit: 'objects a year', topic: 'tech', grp: 'space', ref: owid('yearly-number-of-objects-launched-into-outer-space'), sourceName: 'Our World in Data / UNOOSA', license: OWID_LIC, additive: true, minCountries: 20 },
 
   // ---------- places and society ----------
