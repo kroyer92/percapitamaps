@@ -260,10 +260,10 @@ export function factsForLlm(f: Facts, format: Format): Record<string, unknown> {
     unit: f.unit,
     year: String(f.year),
     countries_ranked: String(f.countries_count),
-    top10: f.ranking.slice(0, 10).map((r) => ({ rank: String(r.rank), country: r.name, value: r.display })),
-    bottom5: f.ranking.slice(-5).map((r) => ({ rank: String(r.rank), country: r.name, value: r.display })),
+    top10: f.ranking.slice(0, 10).map((r) => ({ rank: String(r.rank), country: r.name, code: r.iso3, value: r.display })),
+    bottom5: f.ranking.slice(-5).map((r) => ({ rank: String(r.rank), country: r.name, code: r.iso3, value: r.display })),
     world_median: f.world_median,
-    anchors: Object.values(f.anchors).map((a) => ({ country: a.name, rank: a.rank, of: a.of, value: a.value })),
+    anchors: Object.entries(f.anchors).map(([code, a]) => ({ country: a.name, code, rank: a.rank, of: a.of, value: a.value })),
   };
   if (f.top_vs_median) out.number_1_vs_median = f.top_vs_median;
   if (f.top_vs_usa) out.number_1_vs_united_states = f.top_vs_usa;

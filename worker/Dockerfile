@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /opt/py \
- && /opt/py/bin/pip install --no-cache-dir kokoro-onnx==0.6.1 soundfile==0.13.1 faster-whisper==1.2.0
+ && /opt/py/bin/pip install --no-cache-dir kokoro-onnx==0.6.1 soundfile==0.13.1 faster-whisper==1.2.0 "huggingface_hub<1.0" requests
 
 WORKDIR /app/worker
 COPY worker/package.json worker/package-lock.json ./

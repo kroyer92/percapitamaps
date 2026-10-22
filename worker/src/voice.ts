@@ -16,6 +16,8 @@ export function speakable(text: string): string {
     .replace(/(\d)\s*mm\b/g, '$1 millimetres')
     .replace(/(\d)\s*km\b/g, '$1 kilometres')
     .replace(/(\d(?:\.\d+)?)x\b/g, '$1 times')
+    // "3.53" -> "3 point 5 3"; the voice drops the dot otherwise.
+    .replace(/(\d)\.(\d+)/g, (_m, a, b) => `${a} point ${b.split('').join(' ')}`)
     .replace(/#(\d+)/g, 'number $1')
     .replace(/\bvs\.?\b/gi, 'versus')
     .replace(/\s+/g, ' ')

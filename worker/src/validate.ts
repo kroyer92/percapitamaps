@@ -29,9 +29,26 @@ export function wordCount(s: string): number {
   return s.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 }
 
-const BANNED = [/\bsubscribe\b/i, /\bfollow (us|me|for)\b/i, /did you know/i, /let'?s dive in/i, /\bsmash\b/i];
+const BANNED = [/\bsubscribe\b/i, /\bfollow (us|me|for)\b/i, /did you know/i, /let'?s dive in/i, /\bsmash\b/i, /that'?s (the|our) (full )?list/i, /now you know/i];
 
-export function checkScript(script: Script, allowed: Set<string>, words: [number, number]): string[] {
+// The #1 country and its value: the payoff, so they must stay out of the hook and the first two thirds.
+export interface Spoiler { name: string; value: string }
+
+export function spoils(text: string, sp?: Spoiler): boolean {
+  if (!sp) return false;
+  const t = text.toLowerCase();
+  return t.includes(sp.name.toLowerCase()) || numbersIn(text).some((n) => numbersIn(sp.value).includes(n));
+}
+
+const tokens = (s: string) => new Set(s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length > 2));
+function similar(a: string, b: string): boolean {
+  const x = tokens(a), y = tokens(b);
+  if (x.size < 3 || y.size < 3) return a.trim().toLowerCase() === b.trim().toLowerCase();
+  const shared = [...x].filter((w) => y.has(w)).length;
+  return shared / Math.min(x.size, y.size) >= 0.75;
+}
+
+export function checkScript(script: Script, allowed: Set<string>, words: [number, number], spoiler?: Spoiler): string[] {
   const errors: string[] = [];
   if (!script || !Array.isArray(script.beats)) return ['Output has no "beats" array.'];
   const beats = script.beats;
@@ -46,6 +63,10 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
     if (i === 0 && w > 10) errors.push(`The hook (beat 1) has ${w} words; max 9.`);
     if (b.on_screen && wordCount(b.on_screen) > 7) errors.push(`Beat ${i + 1} on-screen text is too long; max 6 words.`);
     for (const re of BANNED) if (re.test(b.vo) || re.test(b.on_screen ?? '')) errors.push(`Beat ${i + 1} uses a banned phrase (${re.source}).`);
+    if (i < Math.floor((beats.length * 2) / 3) && spoils(`${b.vo} ${b.on_screen ?? ''}`, spoiler))
+      errors.push(`Beat ${i + 1} gives away the answer (${spoiler!.name} / ${spoiler!.value}). Save it for the final third.`);
+    const twin = beats.findIndex((o, j) => j < i && o.vo && similar(o.vo, b.vo));
+    if (twin >= 0) errors.push(`Beat ${i + 1} repeats beat ${twin + 1}. Say something new.`);
     for (const n of [...numbersIn(b.vo), ...numbersIn(b.on_screen ?? '')]) {
       if (!allowed.has(n)) errors.push(`Beat ${i + 1} uses the number ${n}, which is not in FACTS. Copy numbers exactly from FACTS.`);
     }
@@ -53,16 +74,20 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
   return errors;
 }
 
-// Country visuals need ISO3 codes. Two-letter codes are converted; anything else is an error.
+// Country visuals need one ISO3 code. Two-letter codes are converted; from a list
+// ("zoom_to:URY,PRY") the first valid code is kept; with no valid code it is an error.
 export function fixVisuals(beats: Beat[]): string[] {
   const errors: string[] = [];
   beats.forEach((b, i) => {
-    const m = /^(zoom_to|highlight|bar_add):(\w+)$/.exec(b.visual ?? '');
+    const m = /^(zoom_to|highlight|bar_add):(.+)$/.exec((b.visual ?? '').trim());
     if (!m) return;
-    let code = m[2].toUpperCase();
-    if (code.length === 2) code = countries.alpha2ToAlpha3(code) ?? code;
-    if (ISO3.has(code)) b.visual = `${m[1]}:${code}`;
-    else errors.push(`Beat ${i + 1} visual "${b.visual}" needs a 3-letter ISO country code.`);
+    const codes = m[2].split(/[^A-Za-z]+/).filter(Boolean).map((c) => {
+      const up = c.toUpperCase();
+      return up.length === 2 ? countries.alpha2ToAlpha3(up) ?? up : up;
+    });
+    const code = codes.find((c) => ISO3.has(c));
+    if (code) b.visual = `${m[1]}:${code}`;
+    else errors.push(`Beat ${i + 1} visual "${b.visual}" needs one country code from FACTS.`);
   });
   return errors;
 }

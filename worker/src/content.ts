@@ -4,7 +4,7 @@ import { config, FORMAT_NAMES, type Format } from './config.js';
 import { chatJson } from './llm.js';
 import { factsForLlm, type Facts } from './facts.js';
 import * as P from './prompts.js';
-import { allowedNumbers, checkScript, checkText, isBanned, numbersIn, wordCount, type Script } from './validate.js';
+import { allowedNumbers, checkScript, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
 
 export interface Hook { type: string; text: string }
 export interface Packaging {
@@ -39,12 +39,12 @@ export function wordsFor(band?: string): [number, number] {
   return [Math.round(lo * 2.7), Math.round(hi * 2.7)];
 }
 
-async function writeScript(question: string, format: Format, factsText: string, allowed: Set<string>, words: [number, number], twist?: string, fixHint?: string): Promise<Script> {
+async function writeScript(question: string, format: Format, system: string, allowed: Set<string>, words: [number, number], spoiler: Spoiler | undefined, twist?: string, fixHint?: string): Promise<Script> {
   let hint = fixHint;
   let last: string[] = [];
   for (let attempt = 0; attempt < 3; attempt++) {
-    const script = await chatJson<Script>({ temperature: 0.6, system: P.SCRIPT_SYSTEM, user: P.scriptUser(question, format, factsText, words, twist, hint), numPredict: 2000 });
-    const errors = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)]);
+    const script = await chatJson<Script>({ temperature: 0.6, system, user: P.scriptUser(question, format, words, twist, hint), numPredict: 2000 });
+    const errors = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler);
     if (!errors.length) return script;
     last = errors;
     hint = [fixHint, ...errors].filter(Boolean).join(' ');
@@ -81,25 +81,28 @@ export async function generateContent(opts: {
 }): Promise<Content> {
   const { question, format, facts } = opts;
   const llmFacts = factsForLlm(facts, format);
-  const factsText = JSON.stringify(llmFacts, null, 1);
+  const system = P.contentSystem(JSON.stringify(llmFacts));
   const allowed = allowedNumbers(llmFacts, question);
   const words = wordsFor(opts.lengthBand);
+  // SCALE has no single winner to hide.
+  const top = facts.ranking[0];
+  const spoiler: Spoiler | undefined = format !== 'SCALE' && top ? { name: top.name, value: top.display } : undefined;
 
   let fixHint: string | undefined;
   for (let round = 0; round < 2; round++) {
-    const script = await writeScript(question, format, factsText, allowed, words, opts.twist, fixHint);
+    const script = await writeScript(question, format, system, allowed, words, spoiler, opts.twist, fixHint);
     const originalHook = script.beats[0].vo;
 
     // Hooks: keep only the ones that pass the same number and length checks.
-    const h = await chatJson<{ hooks: Hook[]; test_first: number }>({ temperature: 0.6, system: P.HOOKS_SYSTEM, user: P.hooksUser(question, originalHook, factsText) });
-    const hooks = (h.hooks ?? []).filter((x) => x?.text && wordCount(x.text) <= 10 && !isBanned(x.text) && numbersIn(x.text).every((n) => allowed.has(n))).slice(0, 5);
+    const h = await chatJson<{ hooks: Hook[]; test_first: number }>({ temperature: 0.6, system, user: P.hooksUser(question, originalHook) });
+    const hooks = (h.hooks ?? []).filter((x) => x?.text && wordCount(x.text) <= 10 && !isBanned(x.text) && !spoils(x.text, spoiler) && numbersIn(x.text).every((n) => allowed.has(n))).slice(0, 5);
     let chosen = -1;
     if (opts.hookType) chosen = hooks.findIndex((x) => x.type === opts.hookType);
     if (chosen < 0 && hooks.length) chosen = Math.max(0, Math.min(hooks.length - 1, (h.test_first ?? 1) - 1));
     if (chosen >= 0) script.beats[0].vo = hooks[chosen].text;
     if (wordCount(question) <= 9) script.beats[0].on_screen = question;
 
-    const pk = await chatJson<Packaging>({ temperature: 0.6, system: P.PACKAGING_SYSTEM, user: P.packagingUser(question, script.beats[0].vo, factsText, facts.source_line) });
+    const pk = await chatJson<Packaging>({ temperature: 0.6, system, user: P.packagingUser(question, script.beats[0].vo, facts.source_line) });
     pk.title = (pk.title ?? question).replace(/#\S+/g, '').trim().slice(0, 70);
     pk.hashtags = (pk.hashtags ?? ['#shorts', '#maps', '#geography']).slice(0, 3);
     pk.search_tags = (pk.search_tags ?? []).slice(0, 10);
@@ -108,7 +111,7 @@ export async function generateContent(opts: {
     if (checkText('title', pk.title, allowed).length) pk.title = question.slice(0, 70);
     if (!pk.summary || checkText('summary', pk.summary, allowed).length) pk.summary = question;
 
-    const critic = await chatJson<Critic>({ temperature: 0.1, system: P.CRITIC_SYSTEM, user: P.criticUser(factsText, JSON.stringify(script.beats), JSON.stringify(pk)) });
+    const critic = await chatJson<Critic>({ temperature: 0.1, system, user: P.criticUser(JSON.stringify(script.beats), JSON.stringify(pk)) });
     if (critic.verdict === 'pass') {
       return { script, originalHook, hooks, chosenHook: chosen, hookType: chosen >= 0 ? hooks[chosen].type : 'SCRIPT', packaging: pk, critic };
     }
