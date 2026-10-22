@@ -51,8 +51,9 @@ function similar(a: string, b: string): boolean {
 export function checkScript(script: Script, allowed: Set<string>, words: [number, number], spoiler?: Spoiler): string[] {
   const errors: string[] = [];
   if (!script || !Array.isArray(script.beats)) return ['Output has no "beats" array.'];
+  errors.push(...fixVisuals(script.beats));
+  tidy(script);
   const beats = script.beats;
-  errors.push(...fixVisuals(beats));
   if (beats.length < 6 || beats.length > 12) errors.push(`Use 7 to 11 beats (you wrote ${beats.length}).`);
   const total = beats.reduce((s, b) => s + wordCount(b.vo ?? ''), 0);
   if (total < words[0] || total > words[1]) errors.push(`Total spoken words must be ${words[0]}-${words[1]} (you wrote ${total}).`);
@@ -61,7 +62,6 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
     const w = wordCount(b.vo);
     if (w > 12) errors.push(`Beat ${i + 1} has ${w} spoken words; max 8.`);
     if (i === 0 && w > 10) errors.push(`The hook (beat 1) has ${w} words; max 9.`);
-    if (b.on_screen && wordCount(b.on_screen) > 7) errors.push(`Beat ${i + 1} on-screen text is too long; max 6 words.`);
     for (const re of BANNED) if (re.test(b.vo) || re.test(b.on_screen ?? '')) errors.push(`Beat ${i + 1} uses a banned phrase (${re.source}).`);
     if (i < Math.floor((beats.length * 2) / 3) && spoils(`${b.vo} ${b.on_screen ?? ''}`, spoiler))
       errors.push(`Beat ${i + 1} gives away the answer (${spoiler!.name} / ${spoiler!.value}). Save it for the final third.`);
@@ -90,6 +90,22 @@ export function fixVisuals(beats: Beat[]): string[] {
     else errors.push(`Beat ${i + 1} visual "${b.visual}" needs one country code from FACTS.`);
   });
   return errors;
+}
+
+// Small problems the model keeps making are fixed here instead of costing a full rewrite:
+// on-screen text is cut to 6 words, and a beat that repeats an earlier one is dropped
+// while at least 7 beats remain.
+function tidy(script: Script): void {
+  for (const b of script.beats) {
+    if (!b.on_screen || wordCount(b.on_screen) <= 6) continue;
+    const w = b.on_screen.trim().split(/\s+/).slice(0, 6);
+    while (w.length > 2 && /^(in|the|of|a|an|and|or|to|per|with|for|than|by|at|on|is|are)$/i.test(w[w.length - 1])) w.pop();
+    b.on_screen = w.join(' ').replace(/[,;:.\-–]+$/, '');
+  }
+  for (let i = script.beats.length - 1; i > 0 && script.beats.length > 7; i--) {
+    const b = script.beats[i];
+    if (b.vo && script.beats.some((o, j) => j < i && o.vo && similar(o.vo, b.vo))) script.beats.splice(i, 1);
+  }
 }
 
 export function isBanned(text: string): boolean {
