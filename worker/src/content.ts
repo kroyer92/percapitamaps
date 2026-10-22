@@ -4,7 +4,7 @@ import { config, FORMAT_NAMES, type Format } from './config.js';
 import { chatJson } from './llm.js';
 import { factsForLlm, type Facts } from './facts.js';
 import * as P from './prompts.js';
-import { allowedNumbers, checkScript, checkText, numbersIn, wordCount, type Script } from './validate.js';
+import { allowedNumbers, checkScript, checkText, isBanned, numbersIn, wordCount, type Script } from './validate.js';
 
 export interface Hook { type: string; text: string }
 export interface Packaging {
@@ -92,7 +92,7 @@ export async function generateContent(opts: {
 
     // Hooks: keep only the ones that pass the same number and length checks.
     const h = await chatJson<{ hooks: Hook[]; test_first: number }>({ temperature: 0.6, system: P.HOOKS_SYSTEM, user: P.hooksUser(question, originalHook, factsText) });
-    const hooks = (h.hooks ?? []).filter((x) => x?.text && wordCount(x.text) <= 10 && numbersIn(x.text).every((n) => allowed.has(n))).slice(0, 5);
+    const hooks = (h.hooks ?? []).filter((x) => x?.text && wordCount(x.text) <= 10 && !isBanned(x.text) && numbersIn(x.text).every((n) => allowed.has(n))).slice(0, 5);
     let chosen = -1;
     if (opts.hookType) chosen = hooks.findIndex((x) => x.type === opts.hookType);
     if (chosen < 0 && hooks.length) chosen = Math.max(0, Math.min(hooks.length - 1, (h.test_first ?? 1) - 1));

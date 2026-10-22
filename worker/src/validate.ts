@@ -1,3 +1,6 @@
+import countries from 'i18n-iso-countries';
+import { ISO3 } from './data/countries.js';
+
 // Code checks on the model's output. Numbers are the main thing: every number in the
 // voiceover, on-screen text and title must appear in the facts.
 
@@ -32,6 +35,7 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
   const errors: string[] = [];
   if (!script || !Array.isArray(script.beats)) return ['Output has no "beats" array.'];
   const beats = script.beats;
+  errors.push(...fixVisuals(beats));
   if (beats.length < 6 || beats.length > 12) errors.push(`Use 7 to 11 beats (you wrote ${beats.length}).`);
   const total = beats.reduce((s, b) => s + wordCount(b.vo ?? ''), 0);
   if (total < words[0] || total > words[1]) errors.push(`Total spoken words must be ${words[0]}-${words[1]} (you wrote ${total}).`);
@@ -47,6 +51,24 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
     }
   });
   return errors;
+}
+
+// Country visuals need ISO3 codes. Two-letter codes are converted; anything else is an error.
+export function fixVisuals(beats: Beat[]): string[] {
+  const errors: string[] = [];
+  beats.forEach((b, i) => {
+    const m = /^(zoom_to|highlight|bar_add):(\w+)$/.exec(b.visual ?? '');
+    if (!m) return;
+    let code = m[2].toUpperCase();
+    if (code.length === 2) code = countries.alpha2ToAlpha3(code) ?? code;
+    if (ISO3.has(code)) b.visual = `${m[1]}:${code}`;
+    else errors.push(`Beat ${i + 1} visual "${b.visual}" needs a 3-letter ISO country code.`);
+  });
+  return errors;
+}
+
+export function isBanned(text: string): boolean {
+  return BANNED.some((re) => re.test(text));
 }
 
 export function checkText(label: string, text: string, allowed: Set<string>): string[] {

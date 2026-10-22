@@ -79,7 +79,7 @@ export async function pickMusic(seed: number): Promise<MusicPick | undefined> {
 // Mix voice and music, normalise to -14 LUFS (two-pass loudnorm), and mux onto the silent video.
 export async function finalMix(video: string, voice: string, music: MusicPick | undefined, seconds: number, out: string): Promise<void> {
   const dir = path.dirname(out);
-  const mix = path.join(dir, 'mix.wav');
+  const mix = path.join(dir, `${path.basename(out, path.extname(out))}.mix.wav`);
   const inputs = ['-y', '-i', voice];
   let filter = '[0:a]aresample=48000,aformat=channel_layouts=stereo,apad[vo]';
   if (music) {
@@ -89,12 +89,12 @@ export async function finalMix(video: string, voice: string, music: MusicPick | 
   } else {
     filter += ';[vo]anull[a]';
   }
-  await run('ffmpeg', [...inputs, '-filter_complex', filter, '-map', '[a]', '-t', seconds.toFixed(3), '-c:a', 'pcm_s16le', mix]);
+  await run('ffmpeg', [...inputs, '-filter_complex', filter, '-map', '[a]', '-t', seconds.toFixed(3), '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', mix]);
 
   const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', mix, '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json', '-f', 'null', '-']);
   const m = JSON.parse(stderr.slice(stderr.lastIndexOf('{'), stderr.lastIndexOf('}') + 1));
   const ln = `loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
-  await run('ffmpeg', ['-y', '-i', video, '-i', mix, '-filter_complex', `[1:a]${ln},aresample=48000[a]`,
+  await run('ffmpeg', ['-y', '-i', video, '-i', mix, '-filter_complex', `[1:a]${ln},aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]`,
     '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-t', seconds.toFixed(3), out]);
   await fs.rm(mix, { force: true });
 }
