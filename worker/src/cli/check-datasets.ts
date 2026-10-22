@@ -4,10 +4,12 @@
 import { pool, q } from '../db.js';
 import { fetchSeries, licenseVerdict } from '../data/fetch.js';
 import { pickYear, MIN_POPULATION } from '../facts.js';
-import type { CatalogEntry } from '../data/catalog.js';
+import { CATALOG, type CatalogEntry } from '../data/catalog.js';
 
 export async function checkDatasets(only?: string[]): Promise<{ ok: number; failed: { id: string; error: string }[] }> {
-  const rows = await q<{ id: string; spec: CatalogEntry }>(`SELECT id, spec FROM datasets ${only?.length ? 'WHERE id = ANY($1)' : ''} ORDER BY id`, only?.length ? [only] : []);
+  // Only entries still in the catalog; removed ones stay disabled.
+  const ids = only?.length ? only : CATALOG.map((d) => d.id);
+  const rows = await q<{ id: string; spec: CatalogEntry }>('SELECT id, spec FROM datasets WHERE id = ANY($1) ORDER BY id', [ids]);
   const population = await fetchSeries({ kind: 'worldbank', indicator: 'SP.POP.TOTL' });
   const big = new Set<string>();
   for (const [iso, years] of population.values) if ((years.get(Math.max(...years.keys())) ?? 0) >= MIN_POPULATION) big.add(iso);
