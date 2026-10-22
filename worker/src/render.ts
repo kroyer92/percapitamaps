@@ -76,11 +76,13 @@ export async function renderShort(opts: {
   seed: number;
   reuseClips?: VoiceClip[]; // when only the hook changed, re-voice beat 1 only
   onProgress?: (p: number) => void;
+  onStep?: (s: string) => void;
 }): Promise<RenderResult> {
   const { workDir, outFile } = opts;
   await fs.mkdir(workDir, { recursive: true });
 
   const voiceDir = path.join(workDir, 'voice');
+  opts.onStep?.('Recording the voice (the first run also downloads the voice model, about 330 MB)');
   let clips: VoiceClip[];
   if (opts.reuseClips && opts.reuseClips.length === opts.beats.length) {
     const [first] = await synthesize([{ id: `b00-${Date.now()}`, text: opts.beats[0].vo }], opts.voice, voiceDir);
@@ -90,6 +92,7 @@ export async function renderShort(opts: {
   }
 
   const { placed, seconds } = place(opts.beats, clips);
+  opts.onStep?.(`Voice recorded: ${clips.length} clips`);
   const durationInFrames = Math.ceil(seconds * FPS);
   const props = buildProps(opts.format, opts.facts, opts.ds, timedBeats(placed, seconds), durationInFrames);
   await fs.writeFile(path.join(workDir, 'props.json'), JSON.stringify(props));
@@ -97,6 +100,7 @@ export async function renderShort(opts: {
   const voiceTrack = path.join(workDir, 'voice.wav');
   await buildVoiceTrack(placed, seconds, voiceTrack);
 
+  opts.onStep?.('Starting the video renderer (the first run may download Chrome)');
   const url = await serveUrl();
   const composition = await selectComposition({ serveUrl: url, id: 'Short', inputProps: props as any, browserExecutable: process.env.REMOTION_BROWSER || null });
   const silent = path.join(workDir, 'silent.mp4');
@@ -114,6 +118,7 @@ export async function renderShort(opts: {
     onProgress: ({ progress }) => opts.onProgress?.(progress),
   });
 
+  opts.onStep?.('Mixing voice and music');
   const music = await pickMusic(opts.seed);
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await finalMix(silent, voiceTrack, music, seconds, outFile);

@@ -45,9 +45,11 @@ const out = path.join(config.rendersDir, `test-${key}.mp4`);
 let lastPct = -10;
 const res = await renderShort({
   workDir, outFile: out, format, facts, ds, beats: content.script.beats, voice, seed: Date.now(),
+  onStep: step,
   onProgress: (p) => { const pct = Math.floor(p * 100); if (pct >= lastPct + 10) { lastPct = pct; step(`Rendering ${pct}%`); } },
 });
 step(`Rendered ${res.seconds.toFixed(1)} s with voice ${voice}`);
+step('Checking the video (the first run also downloads the speech checker, about 500 MB)');
 const qa = await runQa({ video: out, voiceTrack: path.join(workDir, 'voice.wav'), beats: res.props.beats, fps: 30, sourceLine: facts.source_line, license: facts.license, numbersOk: true, criticVerdict: content.critic.verdict });
 await fs.writeFile(path.join(config.rendersDir, `test-${key}.qa.json`), JSON.stringify({ concept: key, title: content.packaging.title, hooks: content.hooks, qa }, null, 2));
 step('QA:');

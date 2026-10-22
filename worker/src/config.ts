@@ -29,6 +29,7 @@ export const config = {
   ollamaUrl: (env.OLLAMA_URL ?? 'http://ollama:11434').replace(/\/$/, ''),
   ollamaFallbackUrl: (env.OLLAMA_FALLBACK_URL ?? 'http://ollama:11434').replace(/\/$/, ''),
   ollamaModel: env.OLLAMA_MODEL ?? 'qwen3:8b',
+  ollamaNumCtx: Number(env.OLLAMA_NUM_CTX ?? 6144),
   ollamaEmbedModel: env.OLLAMA_EMBED_MODEL ?? 'nomic-embed-text',
   renderConcurrency: Math.max(1, Number(env.RENDER_CONCURRENCY ?? 1)),
   renderThreads: Math.max(1, Number(env.RENDER_THREADS ?? 3)),

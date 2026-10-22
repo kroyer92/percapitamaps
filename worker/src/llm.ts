@@ -12,7 +12,7 @@ async function chatAt(base: string, o: ChatOpts): Promise<string> {
       think: false,
       format: 'json',
       keep_alive: '2m',
-      options: { temperature: o.temperature, num_ctx: 8192, num_predict: o.numPredict ?? 1500 },
+      options: { temperature: o.temperature, num_ctx: config.ollamaNumCtx, num_predict: o.numPredict ?? 1500 },
       messages: [
         { role: 'system', content: o.system },
         { role: 'user', content: o.user },

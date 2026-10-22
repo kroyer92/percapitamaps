@@ -1,5 +1,7 @@
 """Kokoro text-to-speech. Reads a JSON job on stdin, writes one WAV per item, prints durations."""
-import json, os, sys, urllib.request
+import json, os, socket, sys, urllib.request
+
+socket.setdefaulttimeout(120)  # a stalled download fails instead of hanging
 
 import numpy as np
 import soundfile as sf
