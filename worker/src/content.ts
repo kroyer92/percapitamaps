@@ -39,14 +39,16 @@ export function wordsFor(band?: string): [number, number] {
   return [Math.round(lo * 3), Math.round(hi * 3)]; // the voice speaks about 3 words a second
 }
 
-async function writeScript(question: string, format: Format, system: string, allowed: Set<string>, words: [number, number], spoiler: Spoiler | undefined, twist?: string, fixHint?: string): Promise<Script> {
+async function writeScript(question: string, format: Format, system: string, allowed: Set<string>, words: [number, number], spoiler: Spoiler | undefined, twist?: string, fixHint?: string, onStep: (s: string) => void = () => {}): Promise<Script> {
   let hint = fixHint;
   let last: string[] = [];
   let best: { script: Script; minor: number } | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
+    onStep(`Writing the script, try ${attempt + 1} of 3`);
     const script = await chatJson<Script>({ temperature: 0.6, system, user: P.scriptUser(question, format, words, twist, hint), numPredict: 2000 });
     const errors = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler);
     if (!errors.length) return script;
+    onStep(`Try ${attempt + 1} had problems: ${errors.map((e) => e.replace('(minor) ', '')).join(' | ')}`);
     if (errors.every(isMinor) && (!best || errors.length < best.minor)) best = { script, minor: errors.length };
     last = errors;
     hint = [fixHint, ...errors.map((e) => e.replace('(minor) ', ''))].filter(Boolean).join(' ');
@@ -82,8 +84,10 @@ export async function generateContent(opts: {
   twist?: string;
   lengthBand?: string;
   hookType?: string;
+  onStep?: (s: string) => void;
 }): Promise<Content> {
   const { question, format, facts } = opts;
+  const onStep = opts.onStep ?? (() => {});
   const llmFacts = factsForLlm(facts, format);
   const system = P.contentSystem(JSON.stringify(llmFacts));
   const allowed = allowedNumbers(llmFacts, question);
@@ -94,9 +98,10 @@ export async function generateContent(opts: {
 
   let fixHint: string | undefined;
   for (let round = 0; round < 2; round++) {
-    const script = await writeScript(question, format, system, allowed, words, spoiler, opts.twist, fixHint);
+    const script = await writeScript(question, format, system, allowed, words, spoiler, opts.twist, fixHint, onStep);
     const originalHook = script.beats[0].vo;
 
+    onStep('Writing alternative hooks');
     // Hooks: keep only the ones that pass the same number and length checks.
     const h = await chatJson<{ hooks: Hook[]; test_first: number }>({ temperature: 0.6, system, user: P.hooksUser(question, originalHook) });
     const hooks = (h.hooks ?? []).filter((x) => x?.text && wordCount(x.text) <= 10 && !isBanned(x.text) && !spoils(x.text, spoiler) && numbersIn(x.text).every((n) => allowed.has(n))).slice(0, 5);
@@ -106,6 +111,7 @@ export async function generateContent(opts: {
     if (chosen >= 0) script.beats[0].vo = hooks[chosen].text;
     if (wordCount(question) <= 9) script.beats[0].on_screen = question;
 
+    onStep('Writing the title and description');
     const pk = await chatJson<Packaging>({ temperature: 0.6, system, user: P.packagingUser(question, script.beats[0].vo, facts.source_line) });
     pk.title = (pk.title ?? question).replace(/#\S+/g, '').trim().slice(0, 70);
     pk.hashtags = (pk.hashtags ?? ['#shorts', '#maps', '#geography']).slice(0, 3);
@@ -115,6 +121,7 @@ export async function generateContent(opts: {
     if (checkText('title', pk.title, allowed).length) pk.title = question.slice(0, 70);
     if (!pk.summary || checkText('summary', pk.summary, allowed).length) pk.summary = question;
 
+    onStep('Fact-checking');
     const critic = await chatJson<Critic>({ temperature: 0.1, system, user: P.criticUser(JSON.stringify(script.beats), JSON.stringify(pk)) });
     if (critic.verdict === 'pass') {
       return { script, originalHook, hooks, chosenHook: chosen, hookType: chosen >= 0 ? hooks[chosen].type : 'SCRIPT', packaging: pk, critic };

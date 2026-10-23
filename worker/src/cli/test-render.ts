@@ -35,7 +35,7 @@ const step = (s: string) => console.log(`[${((Date.now() - t0) / 1000).toFixed(0
 step(`Concept "${key}" · ${format} · dataset ${spec.id}`);
 const facts = await loadFacts(ds, format);
 step(`Facts: ${facts.year}, ${facts.countries_count} countries, #1 ${facts.ranking[0].name} (${facts.ranking[0].display})`);
-const content = await generateContent({ question: concept.question, format, facts, twist: concept.twist });
+const content = await generateContent({ question: concept.question, format, facts, twist: concept.twist, onStep: step });
 step(`Script written: ${content.script.beats.length} beats, critic ${content.critic.verdict}`);
 content.script.beats.forEach((b, i) => console.log(`         ${i + 1}. ${b.vo}   [${b.visual}] "${b.on_screen}"`));
 await unloadModels();
