@@ -18,12 +18,12 @@ const MAP_H = ZONE.visualBottom - ZONE.visualTop - 80;
 
 interface Camera { k: number; cx: number; cy: number } // zoom factor and the projected point at the centre
 
-function quantileColors(map: Record<string, number>): Map<string, string> {
+function quantileColors(map: Record<string, number>, ramp: string[]): Map<string, string> {
   const entries = Object.entries(map).sort((a, b) => a[1] - b[1]);
   const out = new Map<string, string>();
   entries.forEach(([iso], i) => {
-    const bin = Math.min(C.ramp.length - 1, Math.floor((i / entries.length) * C.ramp.length));
-    out.set(iso, C.ramp[bin]);
+    const bin = Math.min(ramp.length - 1, Math.floor((i / entries.length) * ramp.length));
+    out.set(iso, ramp[bin]);
   });
   return out;
 }
@@ -40,6 +40,7 @@ export function mapCues(beats: TimedBeat[], highlightIso?: string): MapCue[] {
     else if (kind === 'reveal_answer') cues.push({ kind: 'reveal', iso: highlightIso, start: b.start });
   }
   if (!cues.some((c) => c.kind === 'fill')) cues.unshift({ kind: 'fill', start: beats[1]?.start ?? 0 });
+  if (!cues.some((c) => c.kind === 'reveal') && beats.length) cues.push({ kind: 'reveal', iso: highlightIso, start: beats[beats.length - 1].start });
   return cues.sort((a, b) => a.start - b.start);
 }
 
@@ -52,11 +53,13 @@ export const WorldMap: React.FC<{
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const { projection, colors, order } = useMemo(() => {
+  const { projection, colors, early, order } = useMemo(() => {
     const projection = geoEqualEarth().fitExtent([[20, MAP_TOP], [W - 20, MAP_TOP + MAP_H]], { type: 'FeatureCollection', features: FEATURES } as any);
-    const colors = quantileColors(map);
+    const colors = quantileColors(map, C.ramp);
+    // Before the reveal only the blue end of the ramp is used, so the leaders don't glow from the start.
+    const early = quantileColors(map, C.ramp.slice(0, 3));
     const order = new Map(Object.entries(map).sort((a, b) => a[1] - b[1]).map(([iso], i, arr) => [iso, i / arr.length]));
-    return { projection, colors, order };
+    return { projection, colors, early, order };
   }, [map]);
   const path = geoPath(projection);
 
@@ -86,6 +89,15 @@ export const WorldMap: React.FC<{
   const fill = cues.find((c) => c.kind === 'fill')!;
   const fillProgress = interpolate(frame, [fill.start, fill.start + 45], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic) });
 
+  // Countries over the threshold stay blue until the reveal, so the answer isn't on screen
+  // from the first seconds; then they turn amber one by one, biggest value last.
+  const reveal = cues.find((c) => c.kind === 'reveal');
+  const revealStart = reveal?.start ?? Infinity;
+  const over = threshold !== undefined
+    ? Object.entries(map).filter(([, v]) => v > threshold).sort((a, b) => a[1] - b[1]).map(([iso]) => iso)
+    : [];
+  const amberAt = (iso: string) => revealStart + Math.max(0, over.indexOf(iso)) * 4;
+
   const active = [...cues].reverse().find((c) => c.start <= frame && (c.kind === 'highlight' || c.kind === 'reveal' || c.kind === 'zoom'));
   const activeIso = active?.iso;
   const pulse = active ? spring({ frame: frame - active.start, fps, config: { damping: 12 } }) : 0;
@@ -97,6 +109,16 @@ export const WorldMap: React.FC<{
     const p = projection(geoCentroid(activeFeature as any));
     if (p) labelPos = [(p[0] - cam.cx) * cam.k + W / 2, (p[1] - cam.cy) * cam.k + MAP_TOP + MAP_H / 2];
   }
+
+  const ringed = [...over.filter((iso) => frame >= amberAt(iso)), ...(activeIso && !over.includes(activeIso) ? [activeIso] : [])];
+  const markers = ringed.flatMap((iso) => {
+    const f = FEATURES.find((x) => x.iso3 === iso);
+    if (!f) return [];
+    const [[x0, y0], [x1, y1]] = path.bounds(f as any);
+    if (Math.max(x1 - x0, y1 - y0) * cam.k > 45) return [];
+    const p = projection(geoCentroid(f as any));
+    return p ? [{ iso, x: p[0], y: p[1], at: iso === activeIso && active ? active.start : amberAt(iso) }] : [];
+  });
 
   return (
     <>
@@ -114,13 +136,20 @@ export const WorldMap: React.FC<{
               const has = iso in map;
               const rel = order.get(iso) ?? 0;
               const shown = has && fillProgress >= rel * 0.9;
-              const isThreshold = threshold !== undefined && has && map[iso] > threshold;
-              const color = shown ? (threshold !== undefined ? (isThreshold ? C.amber : C.ramp[1]) : colors.get(iso)!) : C.land;
+              const isThreshold = threshold !== undefined && has && map[iso] > threshold && frame >= amberAt(iso);
+              const late = frame >= revealStart && threshold === undefined;
+              const color = shown ? (isThreshold ? C.amber : (late ? colors : early).get(iso)!) : C.land;
               const isActive = iso === activeIso;
               return (
                 <path key={f.id} d={d} fill={color} stroke={isActive ? C.pale : C.border}
                   strokeWidth={(isActive ? 3 + pulse * 2 : 0.6) / cam.k} filter={isActive ? 'url(#glow)' : undefined} />
               );
+            })}
+            {/* Small countries get a ring, or they'd be invisible on a phone. */}
+            {markers.map(({ iso, x, y, at }) => {
+              const pop = spring({ frame: frame - at, fps, config: { damping: 12 } });
+              return <circle key={iso} cx={x} cy={y} r={(22 + 6 * (1 - pop)) / cam.k} fill="none" stroke={C.amber}
+                strokeWidth={4 / cam.k} opacity={pop} />;
             })}
           </g>
         </g>
