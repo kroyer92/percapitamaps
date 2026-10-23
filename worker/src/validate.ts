@@ -4,7 +4,7 @@ import { ISO3 } from './data/countries.js';
 // Code checks on the model's output. Numbers are the main thing: every number in the
 // voiceover, on-screen text and title must appear in the facts.
 
-export interface Beat { vo: string; on_screen: string; visual: string; emphasis_words?: string[] }
+export interface Beat { vo: string; on_screen: string; visual: string; emphasis_words?: string[]; filler?: boolean }
 export interface Script { beats: Beat[]; loop_check?: string }
 
 const NUM = /\d[\d,]*(?:\.\d+)?/g;
@@ -33,6 +33,8 @@ const BANNED = [/\bsubscribe\b/i, /\bfollow (us|me|for)\b/i, /did you know/i, /l
 
 // The #1 country and its value: the payoff, so they must stay out of the hook and the first two thirds.
 export interface Spoiler { name: string; value: string; iso3: string; unit: string }
+// Real facts the code may add as build-up beats when the script is too short (ranks 2-6, anchors).
+export interface Filler { name: string; iso3: string; display: string; rank: number }
 
 // Minor problems are sent back to the writer as hints, but a script with only minor
 // problems is still used after the last attempt instead of failing the whole video.
@@ -54,14 +56,15 @@ function similar(a: string, b: string): boolean {
   return shared / Math.min(x.size, y.size) >= 0.75;
 }
 
-export function checkScript(script: Script, allowed: Set<string>, words: [number, number], spoiler?: Spoiler): string[] {
+export function checkScript(script: Script, allowed: Set<string>, words: [number, number], spoiler?: Spoiler, fillers: Filler[] = []): string[] {
   const errors: string[] = [];
   if (!script || !Array.isArray(script.beats)) return ['Output has no "beats" array.'];
   errors.push(...fixVisuals(script.beats));
   tidy(script);
   if (spoiler) landPayoff(script, spoiler);
+  if (spoiler) padShort(script, words[0], spoiler, fillers);
   const beats = script.beats;
-  if (beats.length < 6 || beats.length > 12) errors.push(`Use 7 to 11 beats (you wrote ${beats.length}).`);
+  if (beats.length < 6 || beats.length > 14) errors.push(`Use 8 to 12 beats (you wrote ${beats.length}).`);
   const total = beats.reduce((s, b) => s + wordCount(b.vo ?? ''), 0);
   // Too short makes a weak video (under about 28 s), so it is a real failure; a bit long is minor.
   if (total < words[0]) errors.push(`Total spoken words must be ${words[0]}-${words[1]} (you wrote ${total}). Add beats with more facts from FACTS.`);
@@ -75,7 +78,7 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
     const early = i < Math.floor((beats.length * 2) / 3);
     if (early && spoils(`${b.vo} ${b.on_screen ?? ''}`, spoiler))
       errors.push(minor(`Beat ${i + 1} gives away the answer (${spoiler!.name} / ${spoiler!.value}). Save it for the final third.`));
-    const twin = beats.findIndex((o, j) => j < i && o.vo && similar(o.vo, b.vo));
+    const twin = b.filler ? -1 : beats.findIndex((o, j) => j < i && !o.filler && o.vo && similar(o.vo, b.vo));
     if (twin >= 0) errors.push(minor(`Beat ${i + 1} repeats beat ${twin + 1}. Say something new.`));
     for (const n of [...numbersIn(b.vo), ...numbersIn(b.on_screen ?? '')]) {
       if (!allowed.has(n)) errors.push(`Beat ${i + 1} uses the number ${n}, which is not in FACTS. Copy numbers exactly from FACTS.`);
@@ -121,6 +124,36 @@ function landPayoff(script: Script, sp: Spoiler): void {
       visual: 'reveal_answer',
       emphasis_words: [sp.name, sp.value],
     } as Beat);
+  }
+}
+
+// The local model often writes too few words. Rather than fail, add build-up beats made only
+// from FACTS (a country, its rank and value) just before the reveal until the script is long enough.
+function padShort(script: Script, minWords: number, sp: Spoiler, fillers: Filler[]): void {
+  const beats = script.beats;
+  const total = () => beats.reduce((n, b) => n + wordCount(b.vo ?? ''), 0);
+  const said = (name: string) => beats.some((b) => `${b.vo} ${b.on_screen}`.toLowerCase().includes(name.toLowerCase()));
+  const unitText = (display: string) => (/^[\d.,]+$/.test(display) ? ` ${sp.unit}` : '');
+  const add: Filler[] = [];
+  let have = total();
+  for (const f of fillers) {
+    if (have >= minWords || beats.length + add.length >= 14) break;
+    if (f.iso3 === sp.iso3 || said(f.name)) continue;
+    add.push(f);
+    have += 7;
+  }
+  // Count down towards the reveal: #4, #3, #2, then the #1.
+  for (const f of add.sort((a, b) => b.rank - a.rank)) {
+    // Just before the reveal: the first reveal_answer beat, else the last beat naming the #1.
+    let at = beats.findIndex((b) => b.visual === 'reveal_answer');
+    if (at < 1) at = beats.map((b) => (b.vo ?? '').includes(sp.name)).lastIndexOf(true);
+    beats.splice(at > 0 ? at : Math.max(1, beats.length - 1), 0, {
+      filler: true,
+      vo: `${f.name} ranks number ${f.rank}, with ${f.display}${unitText(f.display)}.`,
+      on_screen: `#${f.rank} ${f.name}`,
+      visual: `highlight:${f.iso3}`,
+      emphasis_words: [f.name],
+    });
   }
 }
 

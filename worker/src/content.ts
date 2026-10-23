@@ -4,7 +4,7 @@ import { config, FORMAT_NAMES, type Format } from './config.js';
 import { chatJson } from './llm.js';
 import { factsForLlm, type Facts } from './facts.js';
 import * as P from './prompts.js';
-import { allowedNumbers, checkScript, isMinor, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
+import { allowedNumbers, checkScript, isMinor, type Filler, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
 
 export interface Hook { type: string; text: string }
 export interface Packaging {
@@ -39,14 +39,14 @@ export function wordsFor(band?: string): [number, number] {
   return [Math.round(lo * 3), Math.round(hi * 3)]; // the voice speaks about 3 words a second
 }
 
-async function writeScript(question: string, format: Format, system: string, allowed: Set<string>, words: [number, number], spoiler: Spoiler | undefined, twist?: string, fixHint?: string, onStep: (s: string) => void = () => {}): Promise<Script> {
+async function writeScript(question: string, format: Format, system: string, allowed: Set<string>, words: [number, number], spoiler: Spoiler | undefined, fillers: Filler[], twist?: string, fixHint?: string, onStep: (s: string) => void = () => {}): Promise<Script> {
   let hint = fixHint;
   let last: string[] = [];
   let best: { script: Script; minor: number } | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
     onStep(`Writing the script, try ${attempt + 1} of 3`);
     const script = await chatJson<Script>({ temperature: 0.6, system, user: P.scriptUser(question, format, words, twist, hint), numPredict: 2000 });
-    const errors = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler);
+    const errors = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, fillers);
     if (!errors.length) return script;
     onStep(`Try ${attempt + 1} had problems: ${errors.map((e) => e.replace('(minor) ', '')).join(' | ')}`);
     if (errors.every(isMinor) && (!best || errors.length < best.minor)) best = { script, minor: errors.length };
@@ -94,11 +94,17 @@ export async function generateContent(opts: {
   const words = wordsFor(opts.lengthBand);
   // SCALE has no single winner to hide.
   const top = facts.ranking[0];
+  // Ranks 2-6 first, then the anchor countries (e.g. USA, UK), all straight from FACTS.
+  const anchors = new Set(Object.keys(facts.anchors));
+  const fillers: Filler[] = format === 'SCALE' ? [] : [
+    ...facts.ranking.slice(1, 6),
+    ...facts.ranking.filter((r) => anchors.has(r.iso3) && r.rank > 6),
+  ].map((r) => ({ name: r.name, iso3: r.iso3, display: r.display, rank: r.rank }));
   const spoiler: Spoiler | undefined = format !== 'SCALE' && top ? { name: top.name, value: top.display, iso3: top.iso3, unit: facts.unit } : undefined;
 
   let fixHint: string | undefined;
   for (let round = 0; round < 2; round++) {
-    const script = await writeScript(question, format, system, allowed, words, spoiler, opts.twist, fixHint, onStep);
+    const script = await writeScript(question, format, system, allowed, words, spoiler, fillers, opts.twist, fixHint, onStep);
     const originalHook = script.beats[0].vo;
 
     onStep('Writing alternative hooks');

@@ -45,12 +45,12 @@ export function scriptUser(question: string, format: Format, words: [number, num
   return `TASK: write the voiceover script.
 QUESTION: ${question}
 FORMAT: ${format}. ${FORMAT_GUIDE[format]}
-${twist ? `EXPECTED TWIST (from the planner; if FACTS don't support it, build the story around what FACTS actually show): ${twist}\n` : ''}Write a script of 7 to 11 beats.
+${twist ? `EXPECTED TWIST (from the planner; if FACTS don't support it, build the story around what FACTS actually show): ${twist}\n` : ''}Write exactly 10 beats.
 Rules:
 - Total spoken words between ${words[0]} and ${words[1]}.
 - Beat 1 is the hook: max 9 words, starts mid-thought, and creates a gap only the ending closes. It must NOT name the #1 country or its value.
 - Do not name, zoom to or highlight the #1 country, or say its value, before the final third. Build up to it, then name it clearly with its value near the end.
-- No beat longer than 8 spoken words. Every beat names a visual change.
+- After the hook, every beat has 7 to 9 spoken words: a full sentence with a country and a fact, not a fragment. Every beat names a visual change.
 - By beat 3, state what most people would guess, so the twist has something to break.
 - Every beat adds a new fact or contrast. Never repeat or rephrase an earlier beat.
 - The last beat is a sharp final fact or contrast, not a summary. Never "that's the list", "now you know" or similar. It must lead naturally back into beat 1 when the video loops, and must not say "subscribe" or "follow".
