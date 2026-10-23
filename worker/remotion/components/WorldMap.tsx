@@ -49,7 +49,8 @@ export const WorldMap: React.FC<{
   cues: MapCue[];
   labelFor: (iso: string) => string | undefined;
   threshold?: number;
-}> = ({ map, cues, labelFor, threshold }) => {
+  thresholdLabel?: string;
+}> = ({ map, cues, labelFor, threshold, thresholdLabel }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -154,6 +155,19 @@ export const WorldMap: React.FC<{
           </g>
         </g>
       </svg>
+      {/* Key for the amber colour, shown once the countries turn amber. */}
+      {over.length > 0 && thresholdLabel && frame >= revealStart && (() => {
+        const k = spring({ frame: frame - revealStart, fps, config: { damping: 200 }, durationInFrames: 15 });
+        return (
+          <div style={{ position: 'absolute', left: 0, right: 0, top: ZONE.visualBottom - 70, display: 'flex', justifyContent: 'center', opacity: k }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'rgba(10,29,43,0.88)', borderRadius: 14, padding: '10px 22px',
+              fontFamily: FONT, color: C.pale, fontSize: 32, fontWeight: 700 }}>
+              <span style={{ width: 28, height: 28, borderRadius: 6, background: C.amber, display: 'inline-block' }} />
+              {`${over.length} ${over.length === 1 ? 'country' : 'countries'} with ${thresholdLabel}`}
+            </div>
+          </div>
+        );
+      })()}
       {label && (
         <div style={{ position: 'absolute', left: labelPos ? Math.min(W - 380, Math.max(380, labelPos[0])) : W / 2,
           top: labelPos ? Math.min(ZONE.visualBottom - 150, Math.max(ZONE.visualTop + 10, labelPos[1] - 140)) : ZONE.visualTop + 20,

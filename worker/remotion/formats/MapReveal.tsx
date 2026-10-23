@@ -9,6 +9,7 @@ export const MapReveal: React.FC<{ p: ShortProps }> = ({ p }) => {
       map={p.map}
       cues={mapCues(p.beats, p.highlightIso)}
       threshold={p.threshold?.value}
+      thresholdLabel={p.threshold?.label}
       labelFor={(iso) => {
         const r = byIso.get(iso);
         return r ? `#${r.rank} ${r.name} · ${r.display}` : undefined;
