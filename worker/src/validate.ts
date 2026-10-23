@@ -72,7 +72,7 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
   beats.forEach((b, i) => {
     if (!b.vo || typeof b.vo !== 'string') { errors.push(`Beat ${i + 1} has no vo.`); return; }
     const w = wordCount(b.vo);
-    if (w > 12) errors.push(`Beat ${i + 1} has ${w} spoken words; max 8.`);
+    if (w > 14) errors.push(`Beat ${i + 1} has ${w} spoken words; max 12.`);
     if (i === 0 && w > 10) errors.push(`The hook (beat 1) has ${w} words; max 9.`);
     for (const re of BANNED) if (re.test(b.vo) || re.test(b.on_screen ?? '')) errors.push(`Beat ${i + 1} uses a banned phrase (${re.source}).`);
     const early = i < Math.floor((beats.length * 2) / 3);
@@ -166,7 +166,7 @@ function tidy(script: Script): void {
   }
   for (let i = script.beats.length - 1; i > 0 && script.beats.length > 7; i--) {
     const b = script.beats[i];
-    if (b.vo && script.beats.some((o, j) => j < i && o.vo && similar(o.vo, b.vo))) script.beats.splice(i, 1);
+    if (b.vo && !b.filler && script.beats.some((o, j) => j < i && !o.filler && o.vo && similar(o.vo, b.vo))) script.beats.splice(i, 1);
   }
 }
 

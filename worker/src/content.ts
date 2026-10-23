@@ -4,6 +4,7 @@ import { config, FORMAT_NAMES, type Format } from './config.js';
 import { chatJson } from './llm.js';
 import { factsForLlm, type Facts } from './facts.js';
 import * as P from './prompts.js';
+import { planMapReveal, writePlanned } from './plan.js';
 import { allowedNumbers, checkScript, isMinor, type Filler, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
 
 export interface Hook { type: string; text: string }
@@ -104,7 +105,16 @@ export async function generateContent(opts: {
 
   let fixHint: string | undefined;
   for (let round = 0; round < 2; round++) {
-    const script = await writeScript(question, format, system, allowed, words, spoiler, fillers, opts.twist, fixHint, onStep);
+    // MAP_REVEAL uses the planned writer: the code fixes the story, the model writes the lines.
+    // The other formats still ask the model for the whole script.
+    let script: Script;
+    if (format === 'MAP_REVEAL' && top) {
+      script = await writePlanned(system, planMapReveal(question, facts), top.name, fixHint, onStep);
+      const left = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, fillers).filter((e) => !isMinor(e));
+      if (left.length) throw new NeedsHuman('The planned script failed the code checks.', left);
+    } else {
+      script = await writeScript(question, format, system, allowed, words, spoiler, fillers, opts.twist, fixHint, onStep);
+    }
     const originalHook = script.beats[0].vo;
 
     onStep('Writing alternative hooks');
