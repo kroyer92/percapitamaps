@@ -79,7 +79,7 @@ export const SourceLine: React.FC<{ text: string; from: number; handle: string }
     <div style={{ position: 'absolute', top: ZONE.source, left: SAFE.left, right: W - SAFE.right, textAlign: 'center',
       fontFamily: FONT, fontWeight: 500, fontSize: 26, color: C.muted, opacity: o, lineHeight: 1.35 }}>
       {text}
-      <div style={{ color: C.blue, fontWeight: 700, marginTop: 4 }}>{handle}</div>
+      <div style={{ color: C.blue, fontWeight: 700, marginTop: 4 }}>{handle} · follow for a new map every day</div>
     </div>
   );
 };

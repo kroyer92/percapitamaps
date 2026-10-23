@@ -24,6 +24,12 @@ export function speakable(text: string): string {
     .trim();
 }
 
+// Words the voice says the wrong way. Only the audio gets these; captions keep the real spelling.
+// "live" is nearly always the verb in our scripts ("where do they live"), not "live show".
+function forVoice(text: string): string {
+  return text.replace(/\blive\b/gi, (w) => (w[0] === 'L' ? 'Liv' : 'liv'));
+}
+
 export interface VoiceClip { id: string; path: string; seconds: number }
 
 export async function synthesize(items: { id: string; text: string }[], voice: string, outdir: string): Promise<VoiceClip[]> {
@@ -33,7 +39,7 @@ export async function synthesize(items: { id: string; text: string }[], voice: s
     voice,
     outdir,
     speed: Number(process.env.VOICE_SPEED ?? 1.05),
-    items: items.map((i) => ({ id: i.id, text: speakable(i.text) })),
+    items: items.map((i) => ({ id: i.id, text: forVoice(speakable(i.text)) })),
   };
   const { stdout } = await run(config.python, [path.resolve('py/tts.py')], { input: JSON.stringify(job), timeoutMs: 10 * 60_000 });
   return lastJsonLine<{ items: VoiceClip[] }>(stdout).items;
