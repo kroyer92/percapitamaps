@@ -20,6 +20,14 @@ const THE = /^(United |Netherlands|Philippines|Czech|Central African|Dominican|D
 const the = (name: string) => (THE.test(name) ? `the ${name}` : name);
 const The = (name: string) => (THE.test(name) ? `The ${name}` : name);
 
+// One angle per contender, so the build-up lines don't all share one sentence pattern.
+const ANGLES = [
+  'Open with the country name and say it already dwarfs the guess from slot 2, without repeating that number.',
+  'Open with the number, then say which country it is.',
+  'Say what makes this country a surprising place to rank this high, without inventing numbers.',
+  'Say it is close to the top but still not number one.',
+];
+
 const withUnit = (display: string, unit: string) => (/^[\d.,]+$/.test(display) ? `${display} ${unit}` : display);
 
 // Big countries people tend to guess. Each video uses a different one (picked from the dataset
@@ -62,22 +70,22 @@ export function planMapReveal(question: string, f: Facts): Slot[] {
     visual: 'map_fill',
     on_screen: `World median: ${f.world_median}`,
   });
-  for (const c of contenders) {
+  contenders.forEach((c, i) => {
     slots.push({
       role: 'contender',
-      brief: `Build suspense: ${the(c.name)} is number ${c.rank} with ${withUnit(c.display, u)}. Mention one thing that makes this surprising, without inventing numbers.`,
+      brief: `${the(c.name)} is number ${c.rank} with ${withUnit(c.display, u)}. ${ANGLES.at(i % ANGLES.length)}`,
       country: c.name,
       numbers: [c.display, String(c.rank)],
       fallback: `${The(c.name)} ranks number ${c.rank}, with ${withUnit(c.display, u)}.`,
       visual: `highlight:${c.iso3}`,
       on_screen: `#${c.rank} ${c.name}`,
     });
-  }
+  });
   slots.push({
     role: 'reveal',
-    brief: `The payoff: number one is ${the(top.name)}, with ${withUnit(top.display, u)}. Make it land.`,
+    brief: `The payoff: number one is ${the(top.name)}, with ${withUnit(top.display, u)}.${f.top_vs_median ? ` If you compare it with the median, it is ${f.top_vs_median} the median; never say any other multiple.` : ''} Make it land.`,
     country: top.name,
-    numbers: [top.display],
+    numbers: [top.display, ...(f.top_vs_median ? [f.top_vs_median] : [])],
     fallback: `Number one is ${the(top.name)}, with ${withUnit(top.display, u)}.`,
     visual: 'reveal_answer',
     on_screen: `#1 ${top.name}: ${top.display}`,
@@ -125,6 +133,7 @@ export function slotsUser(slots: Slot[], fixHint?: string): string {
   return `TASK: write the voiceover, one spoken line per slot. The story is already planned; you only write the lines.
 Each line: one natural spoken sentence, 7 to 12 words (the hook max 9), that does exactly what its slot says.
 Use only the numbers given in the slot, written exactly as given. Always name the slot's country.
+Start every line differently: never reuse a sentence pattern such as "X has N, but...".
 ${fixHint ? `FIX THIS FROM THE LAST ATTEMPT: ${fixHint}\n` : ''}SLOTS:
 ${slots.map((s, i) => `${i + 1}. ${s.brief}`).join('\n')}
 Return JSON only: {"lines":["line for slot 1","line for slot 2", ...]} with exactly ${slots.length} lines.`;
