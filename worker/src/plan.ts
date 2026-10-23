@@ -22,14 +22,17 @@ const The = (name: string) => (THE.test(name) ? `The ${name}` : name);
 
 const withUnit = (display: string, unit: string) => (/^[\d.,]+$/.test(display) ? `${display} ${unit}` : display);
 
-// Countries people tend to guess first, in order; the first one in the data that isn't in the top 3 is used.
-const BIG_GUESSES = ['USA', 'IND', 'CHN', 'BRA', 'RUS', 'GBR', 'DEU'];
+// Big countries people tend to guess. Each video uses a different one (picked from the dataset
+// id, so the same video always gets the same guess), skipping any in the top 3.
+const BIG_GUESSES = ['USA', 'IND', 'CHN', 'BRA', 'RUS', 'GBR', 'DEU', 'JPN'];
+const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 
 export function planMapReveal(question: string, f: Facts): Slot[] {
   const top = f.ranking[0];
   const u = f.unit;
   const byIso = new Map(f.ranking.map((r) => [r.iso3, r]));
-  const guess = BIG_GUESSES.map((iso) => byIso.get(iso)).find((r): r is RankRow => !!r && r.rank > 3);
+  const options = BIG_GUESSES.map((iso) => byIso.get(iso)).filter((r): r is RankRow => !!r && r.rank > 3);
+  const guess = options.at(hash(f.dataset_id ?? question) % Math.max(1, options.length));
   const contenders = f.ranking.slice(1, 5).reverse(); // #5, #4, #3, #2
 
   const slots: Slot[] = [{
