@@ -32,7 +32,13 @@ export function wordCount(s: string): number {
 const BANNED = [/\bsubscribe\b/i, /\bfollow (us|me|for)\b/i, /did you know/i, /let'?s dive in/i, /\bsmash\b/i, /that'?s (the|our) (full )?list/i, /now you know/i];
 
 // The #1 country and its value: the payoff, so they must stay out of the hook and the first two thirds.
-export interface Spoiler { name: string; value: string; iso3: string }
+export interface Spoiler { name: string; value: string; iso3: string; unit: string }
+
+// Minor problems are sent back to the writer as hints, but a script with only minor
+// problems is still used after the last attempt instead of failing the whole video.
+const MINOR = '(minor) ';
+const minor = (msg: string) => MINOR + msg;
+export const isMinor = (msg: string) => msg.startsWith(MINOR);
 
 export function spoils(text: string, sp?: Spoiler): boolean {
   if (!sp) return false;
@@ -53,10 +59,13 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
   if (!script || !Array.isArray(script.beats)) return ['Output has no "beats" array.'];
   errors.push(...fixVisuals(script.beats));
   tidy(script);
+  if (spoiler) landPayoff(script, spoiler);
   const beats = script.beats;
   if (beats.length < 6 || beats.length > 12) errors.push(`Use 7 to 11 beats (you wrote ${beats.length}).`);
   const total = beats.reduce((s, b) => s + wordCount(b.vo ?? ''), 0);
-  if (total < words[0] || total > words[1]) errors.push(`Total spoken words must be ${words[0]}-${words[1]} (you wrote ${total}).`);
+  // Far too short is a real failure; a little short or long is minor.
+  if (total < words[0] * 0.7) errors.push(`Total spoken words must be ${words[0]}-${words[1]} (you wrote ${total}). Add beats with more facts.`);
+  else if (total < words[0] || total > words[1]) errors.push(minor(`Total spoken words must be ${words[0]}-${words[1]} (you wrote ${total}).`));
   beats.forEach((b, i) => {
     if (!b.vo || typeof b.vo !== 'string') { errors.push(`Beat ${i + 1} has no vo.`); return; }
     const w = wordCount(b.vo);
@@ -65,18 +74,13 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
     for (const re of BANNED) if (re.test(b.vo) || re.test(b.on_screen ?? '')) errors.push(`Beat ${i + 1} uses a banned phrase (${re.source}).`);
     const early = i < Math.floor((beats.length * 2) / 3);
     if (early && spoils(`${b.vo} ${b.on_screen ?? ''}`, spoiler))
-      errors.push(`Beat ${i + 1} gives away the answer (${spoiler!.name} / ${spoiler!.value}). Save it for the final third.`);
-    if (early && spoiler && (b.visual ?? '').endsWith(`:${spoiler.iso3}`))
-      errors.push(`Beat ${i + 1} shows ${spoiler.name} on screen too early. Show it only in the final third.`);
+      errors.push(minor(`Beat ${i + 1} gives away the answer (${spoiler!.name} / ${spoiler!.value}). Save it for the final third.`));
     const twin = beats.findIndex((o, j) => j < i && o.vo && similar(o.vo, b.vo));
-    if (twin >= 0) errors.push(`Beat ${i + 1} repeats beat ${twin + 1}. Say something new.`);
+    if (twin >= 0) errors.push(minor(`Beat ${i + 1} repeats beat ${twin + 1}. Say something new.`));
     for (const n of [...numbersIn(b.vo), ...numbersIn(b.on_screen ?? '')]) {
       if (!allowed.has(n)) errors.push(`Beat ${i + 1} uses the number ${n}, which is not in FACTS. Copy numbers exactly from FACTS.`);
     }
   });
-  // The payoff must land: the #1 is named out loud in the final third.
-  if (spoiler && beats.length && !beats.slice(Math.floor((beats.length * 2) / 3)).some((b) => (b.vo ?? '').toLowerCase().includes(spoiler.name.toLowerCase())))
-    errors.push(`The final third never names the answer. Say "${spoiler.name}" and its value ${spoiler.value} near the end.`);
   return errors;
 }
 
@@ -101,6 +105,25 @@ export function fixVisuals(beats: Beat[]): string[] {
 // Small problems the model keeps making are fixed here instead of costing a full rewrite:
 // on-screen text is cut to 6 words, and a beat that repeats an earlier one is dropped
 // while at least 7 beats remain.
+// The payoff must land. Early visuals that show the #1 fall back to the plain map, and if
+// the final third never names the #1, a reveal beat is added before the last beat.
+function landPayoff(script: Script, sp: Spoiler): void {
+  const beats = script.beats;
+  const cut = () => Math.floor((beats.length * 2) / 3);
+  beats.forEach((b, i) => {
+    if (i < cut() && (b.visual ?? '').endsWith(`:${sp.iso3}`)) b.visual = 'map_fill';
+  });
+  const named = beats.slice(cut()).some((b) => (b.vo ?? '').toLowerCase().includes(sp.name.toLowerCase()));
+  if (!named && beats.length) {
+    beats.splice(Math.max(1, beats.length - 1), 0, {
+      vo: `${sp.name} leads with ${sp.value} ${sp.unit}.`,
+      on_screen: `#1 ${sp.name}`,
+      visual: 'reveal_answer',
+      emphasis_words: [sp.name, sp.value],
+    } as Beat);
+  }
+}
+
 function tidy(script: Script): void {
   for (const b of script.beats) {
     if (!b.on_screen || wordCount(b.on_screen) <= 6) continue;

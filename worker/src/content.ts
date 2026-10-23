@@ -4,7 +4,7 @@ import { config, FORMAT_NAMES, type Format } from './config.js';
 import { chatJson } from './llm.js';
 import { factsForLlm, type Facts } from './facts.js';
 import * as P from './prompts.js';
-import { allowedNumbers, checkScript, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
+import { allowedNumbers, checkScript, isMinor, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
 
 export interface Hook { type: string; text: string }
 export interface Packaging {
@@ -42,13 +42,17 @@ export function wordsFor(band?: string): [number, number] {
 async function writeScript(question: string, format: Format, system: string, allowed: Set<string>, words: [number, number], spoiler: Spoiler | undefined, twist?: string, fixHint?: string): Promise<Script> {
   let hint = fixHint;
   let last: string[] = [];
+  let best: { script: Script; minor: number } | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
     const script = await chatJson<Script>({ temperature: 0.6, system, user: P.scriptUser(question, format, words, twist, hint), numPredict: 2000 });
     const errors = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler);
     if (!errors.length) return script;
+    if (errors.every(isMinor) && (!best || errors.length < best.minor)) best = { script, minor: errors.length };
     last = errors;
-    hint = [fixHint, ...errors].filter(Boolean).join(' ');
+    hint = [fixHint, ...errors.map((e) => e.replace('(minor) ', ''))].filter(Boolean).join(' ');
   }
+  // Only minor problems left (a bit short, a repeat): use the best attempt rather than fail.
+  if (best) return best.script;
   throw new NeedsHuman('The script failed the code checks three times.', last);
 }
 
@@ -86,7 +90,7 @@ export async function generateContent(opts: {
   const words = wordsFor(opts.lengthBand);
   // SCALE has no single winner to hide.
   const top = facts.ranking[0];
-  const spoiler: Spoiler | undefined = format !== 'SCALE' && top ? { name: top.name, value: top.display, iso3: top.iso3 } : undefined;
+  const spoiler: Spoiler | undefined = format !== 'SCALE' && top ? { name: top.name, value: top.display, iso3: top.iso3, unit: facts.unit } : undefined;
 
   let fixHint: string | undefined;
   for (let round = 0; round < 2; round++) {
