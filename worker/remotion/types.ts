@@ -22,6 +22,7 @@ export interface ShortProps {
   map: Record<string, number>;
   highlightIso?: string; // the twist country
   threshold?: { value: number; label: string };
+  unit?: string; // e.g. "cattle per person", shown on the map key
   series?: { years: number[]; countries: { iso3: string; iso2?: string; name: string; values: (number | null)[] }[]; decimals: number; prefix: string; suffix: string };
   scale?: { groups: { name: string; iso2?: string; people: number }[]; per: string };
   guess?: { options: { letter: string; iso3: string; iso2?: string; name: string; display: string }[]; answer: string };

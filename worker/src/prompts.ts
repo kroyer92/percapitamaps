@@ -34,7 +34,7 @@ ${facts}`;
 }
 
 const FORMAT_GUIDE: Record<Format, string> = {
-  MAP_REVEAL: 'The world map is on screen the whole time. Use map_fill early, zoom_to/highlight (one country each) for named countries, reveal_answer for the twist.',
+  MAP_REVEAL: 'The world map is on screen the whole time. Story in this order: (1) hook question; (2) what most people would guess, with zoom_to on that country; (3) two or three surprising contenders from FACTS, each with its own zoom_to or highlight and its value; (4) the reveal: one beat with reveal_answer that names the #1 and its value; (5) one last surprising contrast that leads back to the question. Use map_fill on beat 1 or 2.',
   COUNTDOWN: 'Count down from #10 to #1 using bar_add visuals; you may group the lower ranks in one beat. The #1 lands in the final third with reveal_answer.',
   THEN_NOW: 'A bar race runs from then_vs_now.start_year to the latest year. Use race_year:{YYYY} visuals in order. Compare where countries started with where they are now.',
   SCALE: 'A grid of 100 people (or 100 units) is on screen. Use scale_grid visuals; each beat lights up one group from if_the_world_were_100.',

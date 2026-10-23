@@ -36,7 +36,7 @@ export class NeedsHuman extends Error {
 export function wordsFor(band?: string): [number, number] {
   const m = band?.match(/^(\d+)-(\d+)$/);
   const [lo, hi] = m ? [Number(m[1]), Number(m[2])] : [28, 40];
-  return [Math.round(lo * 2.7), Math.round(hi * 2.7)];
+  return [Math.round(lo * 3), Math.round(hi * 3)]; // the voice speaks about 3 words a second
 }
 
 async function writeScript(question: string, format: Format, system: string, allowed: Set<string>, words: [number, number], spoiler: Spoiler | undefined, twist?: string, fixHint?: string): Promise<Script> {

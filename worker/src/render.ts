@@ -38,6 +38,7 @@ export function buildProps(format: Format, facts: Facts, ds: Pick<CatalogEntry, 
     map: facts.map,
     highlightIso: facts.guess ? facts.guess.options.find((o) => o.letter === facts.guess!.answer)?.iso3 : facts.ranking[0]?.iso3,
     threshold: ds.threshold,
+    unit: facts.unit,
     sourceLine: facts.source_line,
     handle: config.channelHandle,
   };

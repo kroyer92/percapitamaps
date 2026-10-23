@@ -50,17 +50,18 @@ export const WorldMap: React.FC<{
   labelFor: (iso: string) => string | undefined;
   threshold?: number;
   thresholdLabel?: string;
-}> = ({ map, cues, labelFor, threshold, thresholdLabel }) => {
+  unit?: string;
+  answerIso?: string;
+}> = ({ map, cues, labelFor, threshold, thresholdLabel, unit, answerIso }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const { projection, colors, early, order } = useMemo(() => {
+  const { projection, early, order } = useMemo(() => {
     const projection = geoEqualEarth().fitExtent([[20, MAP_TOP], [W - 20, MAP_TOP + MAP_H]], { type: 'FeatureCollection', features: FEATURES } as any);
-    const colors = quantileColors(map, C.ramp);
-    // Before the reveal only the blue end of the ramp is used, so the leaders don't glow from the start.
+    // Only the blue end of the ramp: amber is kept for the answer.
     const early = quantileColors(map, C.ramp.slice(0, 3));
     const order = new Map(Object.entries(map).sort((a, b) => a[1] - b[1]).map(([iso], i, arr) => [iso, i / arr.length]));
-    return { projection, colors, early, order };
+    return { projection, early, order };
   }, [map]);
   const path = geoPath(projection);
 
@@ -137,9 +138,11 @@ export const WorldMap: React.FC<{
               const has = iso in map;
               const rel = order.get(iso) ?? 0;
               const shown = has && fillProgress >= rel * 0.9;
-              const isThreshold = threshold !== undefined && has && map[iso] > threshold && frame >= amberAt(iso);
-              const late = frame >= revealStart && threshold === undefined;
-              const color = shown ? (isThreshold ? C.amber : (late ? colors : early).get(iso)!) : C.land;
+              // Blue shades show the measure the whole video; amber is only ever the answer.
+              const isAnswer = has && (threshold !== undefined
+                ? map[iso] > threshold && frame >= amberAt(iso)
+                : iso === answerIso && frame >= revealStart);
+              const color = shown ? (isAnswer ? C.amber : early.get(iso)!) : C.land;
               const isActive = iso === activeIso;
               return (
                 <path key={f.id} d={d} fill={color} stroke={isActive ? C.pale : C.border}
@@ -155,6 +158,19 @@ export const WorldMap: React.FC<{
           </g>
         </g>
       </svg>
+      {/* Blue key from the fill until the amber key replaces it. */}
+      {fillProgress > 0 && !(over.length > 0 && thresholdLabel && frame >= revealStart) && (
+        <div style={{ position: 'absolute', left: 0, right: 0, top: ZONE.visualBottom - 70, display: 'flex', justifyContent: 'center', opacity: fillProgress }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'rgba(10,29,43,0.88)', borderRadius: 14, padding: '10px 22px',
+            fontFamily: FONT, color: C.pale, fontSize: 28, fontWeight: 700 }}>
+            <span>Less</span>
+            <span style={{ width: 150, height: 20, borderRadius: 6, display: 'inline-block',
+              background: `linear-gradient(90deg, ${C.ramp[0]}, ${C.ramp[1]}, ${C.ramp[2]})` }} />
+            <span>More</span>
+            {unit && <span style={{ opacity: 0.7, fontWeight: 500 }}>{unit}</span>}
+          </div>
+        </div>
+      )}
       {/* Key for the amber colour, shown once the countries turn amber. */}
       {over.length > 0 && thresholdLabel && frame >= revealStart && (() => {
         const k = spring({ frame: frame - revealStart, fps, config: { damping: 200 }, durationInFrames: 15 });

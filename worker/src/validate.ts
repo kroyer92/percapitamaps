@@ -63,9 +63,9 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
   const beats = script.beats;
   if (beats.length < 6 || beats.length > 12) errors.push(`Use 7 to 11 beats (you wrote ${beats.length}).`);
   const total = beats.reduce((s, b) => s + wordCount(b.vo ?? ''), 0);
-  // Far too short is a real failure; a little short or long is minor.
-  if (total < words[0] * 0.7) errors.push(`Total spoken words must be ${words[0]}-${words[1]} (you wrote ${total}). Add beats with more facts.`);
-  else if (total < words[0] || total > words[1]) errors.push(minor(`Total spoken words must be ${words[0]}-${words[1]} (you wrote ${total}).`));
+  // Too short makes a weak video (under about 28 s), so it is a real failure; a bit long is minor.
+  if (total < words[0]) errors.push(`Total spoken words must be ${words[0]}-${words[1]} (you wrote ${total}). Add beats with more facts from FACTS.`);
+  else if (total > words[1]) errors.push(minor(`Total spoken words must be ${words[0]}-${words[1]} (you wrote ${total}).`));
   beats.forEach((b, i) => {
     if (!b.vo || typeof b.vo !== 'string') { errors.push(`Beat ${i + 1} has no vo.`); return; }
     const w = wordCount(b.vo);
