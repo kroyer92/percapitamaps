@@ -1,12 +1,13 @@
 // Planned scripts: the code decides the story (which country, which number, which visual in
 // each beat) and the language model only writes one spoken line per slot. A small local model
 // writes good single sentences but can't plan a story under many rules at once.
+import type { Format } from './config.js';
 import type { Facts, RankRow } from './facts.js';
 import { chatJson } from './llm.js';
 import { isBanned, numbersIn, wordCount, type Beat, type Script } from './validate.js';
 
 export interface Slot {
-  role: 'hook' | 'guess' | 'contender' | 'reveal' | 'closer';
+  role: 'hook' | 'guess' | 'contender' | 'reveal' | 'closer' | 'then' | 'group' | 'options' | 'fixed';
   brief: string; // what the line must say, in plain words
   country?: string; // must appear in the line
   numbers: string[]; // the only numbers the line may use (it must use the first one, if any)
@@ -35,93 +36,260 @@ const withUnit = (display: string, unit: string) => (/^[\d.,]+$/.test(display) ?
 const BIG_GUESSES = ['USA', 'IND', 'CHN', 'BRA', 'RUS', 'GBR', 'DEU', 'JPN'];
 const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 
-export function planMapReveal(question: string, f: Facts): Slot[] {
-  const top = f.ranking[0];
-  const u = f.unit;
-  const byIso = new Map(f.ranking.map((r) => [r.iso3, r]));
-  const options = BIG_GUESSES.map((iso) => byIso.get(iso)).filter((r): r is RankRow => !!r && r.rank > 3);
-  const guess = options.at(hash(f.dataset_id ?? question) % Math.max(1, options.length));
-  const contenders = f.ranking.slice(1, 5).reverse(); // #5, #4, #3, #2
+interface Ctx { question: string; f: Facts; u: string; top: RankRow }
 
-  const slots: Slot[] = [{
-    role: 'hook',
-    brief: `A hook of at most 9 words that makes the viewer want the answer to: "${question}". Do not name any country or number.`,
-    numbers: [],
-    fallback: question,
-    visual: 'map_fill',
-    on_screen: question,
-  }];
-  if (guess) {
-    slots.push({
-      role: 'guess',
-      brief: `Most viewers would guess ${the(guess.name)}. Say that it only has ${withUnit(guess.display, u)}, ranking number ${guess.rank}.`,
-      country: guess.name,
-      numbers: [guess.display, String(guess.rank)],
-      fallback: `You might guess ${the(guess.name)}, but it has only ${withUnit(guess.display, u)}.`,
-      visual: `zoom_to:${guess.iso3}`,
-      on_screen: `${guess.name}: ${guess.display}`,
-    });
-  }
-  slots.push({
+const hookSlot = ({ question }: Ctx, visual: string): Slot => ({
+  role: 'hook',
+  brief: `A hook of at most 9 words that makes the viewer want the answer to: "${question}". Do not name any country or number.`,
+  numbers: [],
+  fallback: question,
+  visual,
+  on_screen: question,
+});
+
+function guessSlot({ f, u, question }: Ctx, minRank: number, visual: (iso: string) => string): Slot | undefined {
+  const byIso = new Map(f.ranking.map((r) => [r.iso3, r]));
+  const options = BIG_GUESSES.map((iso) => byIso.get(iso)).filter((r): r is RankRow => !!r && r.rank > minRank);
+  const guess = options.at(hash(f.dataset_id ?? question) % Math.max(1, options.length));
+  if (!guess) return undefined;
+  return {
+    role: 'guess',
+    brief: `Most viewers would guess ${the(guess.name)}. Say that it only has ${withUnit(guess.display, u)}, ranking number ${guess.rank}.`,
+    country: guess.name,
+    numbers: [guess.display, String(guess.rank)],
+    fallback: `You might guess ${the(guess.name)}, but it has only ${withUnit(guess.display, u)}.`,
+    visual: visual(guess.iso3),
+    on_screen: `${guess.name}: ${guess.display}`,
+  };
+}
+
+const medianSlot = ({ f, u }: Ctx, visual: string): Slot => ({
+  role: 'contender',
+  brief: `Context: the typical country (the world median) has just ${withUnit(f.world_median, u)}.`,
+  numbers: [f.world_median],
+  fallback: `The typical country has just ${withUnit(f.world_median, u)}.`,
+  visual,
+  on_screen: `World median: ${f.world_median}`,
+});
+
+// #5, #4, #3, #2 (or a shorter run), each with its own angle.
+const contenderSlots = ({ f, u }: Ctx, from: number, visual: (iso: string) => string): Slot[] =>
+  f.ranking.slice(1, from).reverse().map((c, i) => ({
     role: 'contender',
-    brief: `Context: the typical country (the world median) has just ${withUnit(f.world_median, u)}.`,
-    numbers: [f.world_median],
-    fallback: `The typical country has just ${withUnit(f.world_median, u)}.`,
-    visual: 'map_fill',
-    on_screen: `World median: ${f.world_median}`,
-  });
-  contenders.forEach((c, i) => {
-    slots.push({
-      role: 'contender',
-      brief: `${the(c.name)} is number ${c.rank} with ${withUnit(c.display, u)}. ${ANGLES.at(i % ANGLES.length)}`,
-      country: c.name,
-      numbers: [c.display, String(c.rank)],
-      fallback: `${The(c.name)} ranks number ${c.rank}, with ${withUnit(c.display, u)}.`,
-      visual: `highlight:${c.iso3}`,
-      on_screen: `#${c.rank} ${c.name}`,
-    });
-  });
-  slots.push({
-    role: 'reveal',
-    brief: `The payoff: number one is ${the(top.name)}, with ${withUnit(top.display, u)}.${f.top_vs_median ? ` If you compare it with the median, it is ${f.top_vs_median} the median; never say any other multiple.` : ''} Make it land.`,
-    country: top.name,
-    numbers: [top.display, ...(f.top_vs_median ? [f.top_vs_median] : [])],
-    fallback: `Number one is ${the(top.name)}, with ${withUnit(top.display, u)}.`,
-    visual: 'reveal_answer',
-    on_screen: `#1 ${top.name}: ${top.display}`,
-  });
+    brief: `${the(c.name)} is number ${c.rank} with ${withUnit(c.display, u)}. ${ANGLES.at(i % ANGLES.length)}`,
+    country: c.name,
+    numbers: [c.display, String(c.rank)],
+    fallback: `${The(c.name)} ranks number ${c.rank}, with ${withUnit(c.display, u)}.`,
+    visual: visual(c.iso3),
+    on_screen: `#${c.rank} ${c.name}`,
+  }));
+
+const revealSlot = ({ f, u, top }: Ctx, lead = 'number one is'): Slot => ({
+  role: 'reveal',
+  brief: `The payoff: ${lead} ${the(top.name)}, with ${withUnit(top.display, u)}.${f.top_vs_median ? ` If you compare it with the median, it is ${f.top_vs_median} the median; never say any other multiple.` : ''} Make it land.`,
+  country: top.name,
+  numbers: [top.display, ...(f.top_vs_median ? [f.top_vs_median] : [])],
+  fallback: `${lead.charAt(0).toUpperCase()}${lead.slice(1)} ${the(top.name)}, with ${withUnit(top.display, u)}.`,
+  visual: 'reveal_answer',
+  on_screen: `#1 ${top.name}: ${top.display}`,
+});
+
+function closerSlot({ f, top }: Ctx, visual: string): Slot | undefined {
   if (f.threshold) {
-    slots.push({
+    return {
       role: 'closer',
       brief: `A closing line: only ${f.threshold.count} countries have ${f.threshold.label}. End on that surprise, so the video can loop back to the question.`,
       numbers: [f.threshold.count],
       fallback: `Only ${f.threshold.count} countries have ${f.threshold.label}.`,
-      visual: 'map_fill',
+      visual,
       on_screen: `${f.threshold.count} countries`,
-    });
-  } else if (f.top_vs_median) {
-    slots.push({
+    };
+  }
+  if (f.top_vs_median) {
+    return {
       role: 'closer',
       brief: `A closing line: ${the(top.name)} has ${f.top_vs_median} the world median of ${f.world_median}. End on that contrast, so the video can loop back to the question.`,
       country: top.name,
       numbers: [...numbersIn(f.top_vs_median), f.world_median],
       fallback: `That is ${f.top_vs_median} the world median.`,
-      visual: 'map_fill',
+      visual,
       on_screen: `${f.top_vs_median} the median`,
-    });
+    };
   }
-  return slots;
+  return undefined;
+}
+
+const nameOf = (s: string) => s.split(': ')[0];
+const valueOf = (s: string) => s.split(': ').slice(1).join(': ');
+
+// One story per format. Formats the code can't plan (missing facts) return undefined and
+// fall back to the old single-prompt writer.
+export function planFor(format: Format, question: string, f: Facts): Slot[] | undefined {
+  const top = f.ranking[0];
+  if (!top) return undefined;
+  const c: Ctx = { question, f, u: f.unit, top };
+  const keep = (xs: (Slot | undefined)[]) => xs.filter((x): x is Slot => !!x);
+
+  if (format === 'MAP_REVEAL') {
+    return keep([
+      hookSlot(c, 'map_fill'),
+      guessSlot(c, 3, (iso) => `zoom_to:${iso}`),
+      medianSlot(c, 'map_fill'),
+      ...contenderSlots(c, 5, (iso) => `highlight:${iso}`),
+      revealSlot(c),
+      closerSlot(c, 'map_fill'),
+    ]);
+  }
+
+  if (format === 'COUNTDOWN') {
+    const low = f.ranking.slice(5, 10).reverse(); // #10 .. #6
+    const names = low.map((r) => the(r.name));
+    const lowList = `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+    return keep([
+      hookSlot(c, `counter:10`),
+      low.length ? {
+        role: 'contender',
+        brief: `Quickly run through numbers ${low[0].rank} to ${low.at(-1)!.rank}: ${lowList}. Names only, no values.`,
+        numbers: [String(low[0].rank), String(low.at(-1)!.rank)],
+        fallback: `Numbers ${low[0].rank} to ${low.at(-1)!.rank}: ${lowList}.`,
+        visual: `bar_add:${low.at(-1)!.iso3}`,
+        on_screen: `#${low[0].rank} to #${low.at(-1)!.rank}`,
+      } as Slot : undefined,
+      guessSlot(c, 10, (iso) => `counter:${f.ranking.find((r) => r.iso3 === iso)?.rank ?? 10}`),
+      ...contenderSlots(c, 5, (iso) => `bar_add:${iso}`),
+      revealSlot(c),
+      closerSlot(c, 'counter:1'),
+    ]);
+  }
+
+  if (format === 'THEN_NOW' && f.series) {
+    const s = f.series;
+    const then = s.start_top3.map(nameOf);
+    const now = f.ranking.slice(0, 3);
+    return keep([
+      hookSlot(c, `race_year:${s.start_year}`),
+      {
+        role: 'then',
+        brief: `Back in ${s.start_year}, the top three were ${then.map(the).join(', ')}. Set the scene.`,
+        numbers: [String(s.start_year)],
+        fallback: `In ${s.start_year}, the leaders were ${then.slice(0, -1).map(the).join(', ')} and ${the(then.at(-1) ?? '')}.`,
+        visual: `race_year:${s.start_year}`,
+        on_screen: `${s.start_year}: #1 ${then[0]}`,
+      },
+      {
+        role: 'then',
+        brief: `Back then, the typical country had ${withUnit(s.start_median, c.u)}; today it is ${withUnit(f.world_median, c.u)}.`,
+        numbers: [s.start_median, f.world_median],
+        fallback: `The typical country went from ${withUnit(s.start_median, c.u)} to ${withUnit(f.world_median, c.u)}.`,
+        visual: `race_year:${Math.round((s.start_year + f.year) / 2)}`,
+        on_screen: `Median: ${s.start_median} → ${f.world_median}`,
+      },
+      ...now.slice(1).reverse().map((r, i): Slot => ({
+        role: 'contender',
+        brief: `Today ${the(r.name)} is number ${r.rank} with ${withUnit(r.display, c.u)}. ${ANGLES.at((i + 1) % ANGLES.length)}`,
+        country: r.name,
+        numbers: [r.display, String(r.rank)],
+        fallback: `Today ${the(r.name)} ranks number ${r.rank}, with ${withUnit(r.display, c.u)}.`,
+        visual: `race_year:${f.year}`,
+        on_screen: `#${r.rank} ${r.name}`,
+      })),
+      revealSlot(c, `in ${f.year}, number one is`),
+      then[0] && then[0] !== top.name ? {
+        role: 'closer',
+        brief: `A closing line: in ${s.start_year} the leader was ${the(then[0])}, with ${valueOf(s.start_top3[0])}. Contrast that with today, so the video can loop back to the question.`,
+        country: then[0],
+        numbers: [String(s.start_year), valueOf(s.start_top3[0])],
+        fallback: `In ${s.start_year}, ${the(then[0])} led with ${valueOf(s.start_top3[0])}.`,
+        visual: `race_year:${f.year}`,
+        on_screen: `${s.start_year} leader: ${then[0]}`,
+      } as Slot : closerSlot(c, `race_year:${f.year}`),
+    ]);
+  }
+
+  if (format === 'SCALE' && f.scale) {
+    const groups = f.scale.groups;
+    const what = f.title.toLowerCase();
+    const [g1, g2] = groups.filter((g) => g.iso3);
+    return keep([
+      hookSlot(c, 'scale_grid'),
+      {
+        role: 'then',
+        brief: `Set up the picture: shrink the whole world's ${what} down to just 100.`,
+        numbers: ['100'],
+        fallback: `Shrink the whole world's ${what} down to just 100.`,
+        visual: 'map_fill', // not a scale_grid beat, so the first group lights on the next one
+        on_screen: 'If the world were 100',
+      },
+      ...groups.map((g): Slot => g.iso3 ? {
+        role: 'group',
+        brief: `If the world's ${what} were 100, ${the(g.name)} would have ${g.people} of them. Say it plainly.`,
+        country: g.name,
+        numbers: [String(g.people)],
+        fallback: `${The(g.name)} would have ${g.people} of every 100.`,
+        visual: `scale_grid`,
+        on_screen: `${g.name}: ${g.people}`,
+      } : {
+        role: 'group',
+        brief: `Everyone else in the world shares the last ${g.people}. Make the contrast land.`,
+        numbers: [String(g.people)],
+        fallback: `The whole rest of the world shares just ${g.people}.`,
+        visual: `scale_grid`,
+        on_screen: `Rest of the world: ${g.people}`,
+      }),
+      g1 && g2 ? {
+        role: 'group',
+        brief: `Together, ${the(g1.name)} and ${the(g2.name)} would have ${g1.people + g2.people} of the 100. Make it land.`,
+        country: g1.name,
+        numbers: [String(g1.people + g2.people), '100'],
+        fallback: `Together, ${the(g1.name)} and ${the(g2.name)} would have ${g1.people + g2.people} of the 100.`,
+        visual: 'reveal_answer',
+        on_screen: `${g1.name} + ${g2.name}: ${g1.people + g2.people}`,
+      } as Slot : undefined,
+      {
+        role: 'closer',
+        brief: `A closing line: the world total is ${withUnit(f.scale.world_total, c.u)}. End so the video can loop back to the question.`,
+        numbers: [f.scale.world_total],
+        fallback: `The real world total is ${f.scale.world_total}.`,
+        visual: 'scale_grid',
+        on_screen: `Total: ${f.scale.world_total}`,
+      },
+    ]);
+  }
+
+  if (format === 'GUESS' && f.guess) {
+    const opts = f.guess.options;
+    const list = opts.map((o) => `${o.letter}, ${the(o.name)}`).join('; ');
+    return keep([
+      hookSlot(c, 'map_fill'),
+      {
+        role: 'options',
+        brief: `Ask the viewer to pick one: ${list}. Name all three in order.`,
+        numbers: [],
+        fallback: `Is it ${opts.map((o) => the(o.name)).slice(0, -1).join(', ')}, or ${the(opts.at(-1)!.name)}?`,
+        visual: 'flag_row',
+        on_screen: 'Pick one',
+      },
+      { role: 'fixed', brief: 'Write exactly: Think about it.', numbers: [], fallback: 'Think about it.', visual: 'pause', on_screen: '3… 2… 1…' },
+      medianSlot(c, 'flag_row'),
+      revealSlot(c, 'the answer is'),
+      ...contenderSlots(c, 3, () => 'reveal_answer').slice(-1), // #2
+      closerSlot(c, 'reveal_answer'),
+    ]);
+  }
+  return undefined;
 }
 
 // Rules for one line. Anything that fails falls back to the slot's template line.
 export function lineProblem(line: unknown, s: Slot, topName: string): string | undefined {
+  if (s.role === 'fixed') return 'fixed line';
   if (typeof line !== 'string' || !line.trim()) return 'empty';
   const w = wordCount(line);
   if (w > (s.role === 'hook' ? 10 : 14)) return 'too long';
   if (s.role !== 'hook' && w < 5) return 'too short';
   if (isBanned(line)) return 'banned phrase';
   if (s.country && !line.toLowerCase().includes(s.country.toLowerCase())) return 'missing country';
-  if (s.role !== 'reveal' && s.role !== 'closer' && line.toLowerCase().includes(topName.toLowerCase())) return 'names the answer early';
+  const early = s.role === 'hook' || s.role === 'guess' || s.role === 'contender';
+  if (early && topName && line.toLowerCase().includes(topName.toLowerCase())) return 'names the answer early';
   const allowed = new Set(s.numbers.flatMap((n) => numbersIn(n)));
   if (numbersIn(line).some((n) => !allowed.has(n))) return 'number not allowed';
   const must = s.numbers[0] ? numbersIn(s.numbers[0]) : [];
@@ -146,7 +314,7 @@ export async function writePlanned(system: string, slots: Slot[], topName: strin
   const fixed: string[] = [];
   const beats: Beat[] = slots.map((s, i) => {
     const problem = lineProblem(lines[i], s, topName);
-    if (problem) fixed.push(`${i + 1} (${problem})`);
+    if (problem && s.role !== 'fixed') fixed.push(`${i + 1} (${problem})`);
     // filler: planned beats repeat a pattern on purpose, so the repeat check skips them.
     return { vo: problem ? s.fallback : String(lines[i]).trim(), on_screen: s.on_screen, visual: s.visual, emphasis_words: s.country ? [s.country] : [], filler: true };
   });

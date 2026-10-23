@@ -49,7 +49,10 @@ export async function transcribe(audio: string): Promise<Word[]> {
 
 // Word error rate between what the script says and what Whisper heard.
 export function wordErrorRate(expected: string, heard: string): number {
-  const norm = (s: string) => speakable(s).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+  // Numbers are left out: Whisper writes them in many ways ("1.44", "1. 44", "one point four
+  // four"), and the script's numbers are already checked against the data elsewhere.
+  const NUMBER = /^(\d+|point|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|trillion)$/;
+  const norm = (s: string) => speakable(s).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w && !NUMBER.test(w));
   const a = norm(expected);
   const b = norm(heard);
   const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
