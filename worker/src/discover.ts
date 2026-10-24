@@ -36,10 +36,18 @@ export async function collectSignals(): Promise<Signal[]> {
       }
     })
     .catch((e) => console.warn('[discover] wikipedia', e.message));
+  // Reddit often refuses its JSON to server addresses (403); the RSS feed is tried next. Both
+  // are optional: Wikipedia and YouTube autocomplete are enough on their own.
   for (const sub of ['MapPorn', 'dataisbeautiful']) {
     await getJson(`https://www.reddit.com/r/${sub}/top.json?t=day&limit=15`)
       .then((j) => j.data?.children?.forEach((c: any) => signals.push({ source: `r/${sub}`, text: c.data.title, score: c.data.ups })))
-      .catch((e) => console.warn(`[discover] reddit ${sub}`, e.message));
+      .catch(async () => {
+        const res = await fetch(`https://www.reddit.com/r/${sub}/top/.rss?t=day&limit=15`, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(20_000) });
+        if (!res.ok) throw new Error(String(res.status));
+        const titles = [...(await res.text()).matchAll(/<entry>[\s\S]*?<title>([^<]+)<\/title>/g)].map((m) => m[1]);
+        titles.forEach((t, i) => signals.push({ source: `r/${sub}`, text: t.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'"), score: 1000 - i * 50 }));
+      })
+      .catch((e) => console.warn(`[discover] reddit ${sub} skipped (${e.message}); other sources still used`));
   }
   for (const seed of SEEDS) {
     await getJson(`https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(seed)}`)
