@@ -29,6 +29,50 @@ const ANGLES = [
   'Say it is close to the top but still not number one.',
 ];
 
+// One slot per country group in the "world of 100" picture. Countries with the same count share
+// a line, and each line gets its own shape and plain fallback, so they don't all sound alike.
+type ScaleGroup = { name: string; iso3?: string; people: number };
+const SCALE_SHAPES: { brief: string; fallback: (names: string, n: number) => string }[] = [
+  { brief: 'Say it plainly, as the first and biggest group.', fallback: (x, n) => `${x} would get ${n} of the 100.` },
+  { brief: 'Open with the number, then the country. Do not repeat words from the line before.', fallback: (x, n) => `${n} more belong to ${x}.` },
+  { brief: 'Keep it short and punchy, like a quick count.', fallback: (x, n) => `${x}? Just ${n}.` },
+  { brief: 'Say how small or big that share feels. Do not repeat earlier phrasing.', fallback: (x, n) => `Only ${n} would come from ${x}.` },
+  { brief: 'Mention it in passing, as the count goes on.', fallback: (x, n) => `Then ${x}, with ${n}.` },
+];
+function scaleGroupSlots(groups: ScaleGroup[]): Slot[] {
+  const merged: { names: string[]; people: number }[] = [];
+  for (const g of groups.filter((x) => x.iso3)) {
+    const last = merged.at(-1);
+    if (last && last.people === g.people) last.names.push(g.name);
+    else merged.push({ names: [g.name], people: g.people });
+  }
+  const slots: Slot[] = merged.map((m, i) => {
+    const shape = SCALE_SHAPES[i % SCALE_SHAPES.length];
+    const both = m.names.length > 1;
+    const names = both ? `${m.names.slice(0, -1).map(the).join(', ')} and ${the(m.names.at(-1)!)}` : the(m.names[0]);
+    const line = both ? `${names} would have ${m.people} each.` : shape.fallback(names, m.people);
+    return {
+      role: 'group',
+      brief: `${names} would have ${m.people}${both ? ' each' : ''} of the 100. ${shape.brief}`,
+      country: m.names[0],
+      numbers: [String(m.people)],
+      fallback: line[0].toUpperCase() + line.slice(1),
+      visual: 'scale_grid',
+      on_screen: `${m.names.join(' + ')}: ${m.people}${both ? ' each' : ''}`,
+    };
+  });
+  const rest = groups.find((g) => !g.iso3);
+  if (rest) slots.push({
+    role: 'group',
+    brief: `Everyone else in the world shares the last ${rest.people}. Make the contrast land.`,
+    numbers: [String(rest.people)],
+    fallback: `The whole rest of the world shares just ${rest.people}.`,
+    visual: 'scale_grid',
+    on_screen: `Rest of the world: ${rest.people}`,
+  });
+  return slots;
+}
+
 const withUnit = (display: string, unit: string) => (/^[\d.,]+$/.test(display) ? `${display} ${unit}` : display);
 
 // Big countries people tend to guess. Each video uses a different one (picked from the dataset
@@ -220,22 +264,7 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
         visual: 'map_fill', // not a scale_grid beat, so the first group lights on the next one
         on_screen: 'If the world were 100',
       },
-      ...groups.map((g): Slot => g.iso3 ? {
-        role: 'group',
-        brief: `If the world's ${what} were 100, ${the(g.name)} would have ${g.people} of them. Say it plainly.`,
-        country: g.name,
-        numbers: [String(g.people)],
-        fallback: `${The(g.name)} would have ${g.people} of every 100.`,
-        visual: `scale_grid`,
-        on_screen: `${g.name}: ${g.people}`,
-      } : {
-        role: 'group',
-        brief: `Everyone else in the world shares the last ${g.people}. Make the contrast land.`,
-        numbers: [String(g.people)],
-        fallback: `The whole rest of the world shares just ${g.people}.`,
-        visual: `scale_grid`,
-        on_screen: `Rest of the world: ${g.people}`,
-      }),
+      ...scaleGroupSlots(groups),
       g1 && g2 ? {
         role: 'group',
         brief: `Together, ${the(g1.name)} and ${the(g2.name)} would have ${g1.people + g2.people} of the 100. Make it land.`,
@@ -301,19 +330,30 @@ export function slotsUser(slots: Slot[], fixHint?: string): string {
   return `TASK: write the voiceover, one spoken line per slot. The story is already planned; you only write the lines.
 Each line: one natural spoken sentence, 7 to 12 words (the hook max 9), that does exactly what its slot says.
 Use only the numbers given in the slot, written exactly as given. Always name the slot's country.
-Start every line differently: never reuse a sentence pattern such as "X has N, but...".
+Start every line differently: never reuse a sentence pattern such as "X has N, but...", and never repeat a phrase (like "in this tiny world") across lines.
 ${fixHint ? `FIX THIS FROM THE LAST ATTEMPT: ${fixHint}\n` : ''}SLOTS:
 ${slots.map((s, i) => `${i + 1}. ${s.brief}`).join('\n')}
 Return JSON only: {"lines":["line for slot 1","line for slot 2", ...]} with exactly ${slots.length} lines.`;
 }
+
+// A three-word phrase may appear in two lines, not three ("in this tiny world" every line).
+const phrases = (line: string) => {
+  const w = line.toLowerCase().replace(/[^a-z' ]/g, ' ').split(/\s+/).filter(Boolean);
+  return new Set(w.slice(2).map((_, i) => w.slice(i, i + 3).join(' ')));
+};
+const overused = (line: string, seen: Map<string, number>) => [...phrases(line)].some((p) => (seen.get(p) ?? 0) >= 2);
+const remember = (line: string, seen: Map<string, number>) => phrases(line).forEach((p) => seen.set(p, (seen.get(p) ?? 0) + 1));
 
 export async function writePlanned(system: string, slots: Slot[], topName: string, fixHint?: string, onStep: (s: string) => void = () => {}): Promise<Script> {
   onStep(`Writing ${slots.length} planned lines`);
   const out = await chatJson<{ lines?: unknown[] }>({ temperature: 0.7, system, user: slotsUser(slots, fixHint), numPredict: 900 }).catch(() => ({ lines: [] as unknown[] }));
   const lines = Array.isArray(out.lines) ? out.lines : [];
   const fixed: string[] = [];
+  const seen = new Map<string, number>(); // three-word phrase -> lines that used it
   const beats: Beat[] = slots.map((s, i) => {
-    const problem = lineProblem(lines[i], s, topName);
+    let problem = lineProblem(lines[i], s, topName);
+    if (!problem && overused(String(lines[i]), seen)) problem = 'repeats a phrase';
+    if (!problem) remember(String(lines[i]), seen);
     if (problem && s.role !== 'fixed') fixed.push(`${i + 1} (${problem})`);
     // filler: planned beats repeat a pattern on purpose, so the repeat check skips them.
     return { vo: problem ? s.fallback : String(lines[i]).trim(), on_screen: s.on_screen, visual: s.visual, emphasis_words: s.country ? [s.country] : [], filler: true };

@@ -12,7 +12,10 @@ export const Scale: React.FC<{ p: ShortProps }> = ({ p }) => {
   const groups = p.scale!.groups;
   // Each scale_grid beat (after the first) lights up the next group; the rest stay grey until the end.
   const lightBeats = p.beats.filter((b) => b.visual.startsWith('scale_grid') || b.visual.startsWith('highlight'));
-  const starts = groups.map((_, i) => lightBeats[i + 1]?.start ?? lightBeats[lightBeats.length - 1]?.start ?? 0);
+  // A group lights on the beat that names it on screen (two countries with the same count share
+  // one beat); otherwise on the next scale_grid beat in order.
+  const starts = groups.map((g, i) => p.beats.find((b) => b.on_screen.split(/[:+]/).some((x) => x.trim() === g.name))?.start
+    ?? lightBeats[i + 1]?.start ?? lightBeats[lightBeats.length - 1]?.start ?? 0);
   const people: { g: number }[] = [];
   groups.forEach((g, gi) => { for (let k = 0; k < g.people; k++) people.push({ g: gi }); });
   const cell = 56;
