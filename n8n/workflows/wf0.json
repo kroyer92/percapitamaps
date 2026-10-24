@@ -24,9 +24,10 @@
       ],
       "parameters": {
         "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
-        "text": "=⚠️ n8n: {{ $json.workflow.name }} failed at \"{{ $json.execution.lastNodeExecuted }}\"\n{{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "text": "=⚠️ n8n: {{ String($json.workflow.name).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }} failed at \"{{ String($json.execution.lastNodeExecuted).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}\"\n{{ String($json.execution.error.message).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}\n{{ String($json.execution.url).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
         "additionalFields": {
-          "appendAttribution": false
+          "appendAttribution": false,
+          "parse_mode": "HTML"
         }
       }
     }

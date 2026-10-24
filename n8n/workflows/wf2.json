@@ -92,9 +92,10 @@
       ],
       "parameters": {
         "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
-        "text": "=⚠️ WF2 could not reach the render worker: {{ $json.error?.message ?? $json.message ?? \"no answer\" }}\nCheck it with: docker compose ps",
+        "text": "=⚠️ WF2 could not reach the render worker: {{ String($json.error?.message ?? $json.message ?? \"no answer\").replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}\nCheck it with: docker compose ps",
         "additionalFields": {
-          "appendAttribution": false
+          "appendAttribution": false,
+          "parse_mode": "HTML"
         }
       }
     }

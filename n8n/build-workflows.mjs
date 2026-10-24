@@ -19,9 +19,13 @@ const post = (wf, name, url, pos, body, extra = {}) => node(wf, name, 'n8n-nodes
   ...(body ? { sendBody: true, specifyBody: 'json', jsonBody: body } : {}),
   options: { timeout: 60000 },
 }, { ...retry, ...extra });
+// HTML, not n8n's default Markdown: in Markdown an error like "EAI_AGAIN" opens an italic that never
+// closes, Telegram refuses the message ("can't parse entities") and the alert is lost.
+// Dynamic text goes through esc() so <, > and & can't break it either.
 const telegram = (wf, name, text, pos) => node(wf, name, 'n8n-nodes-base.telegram', 1.2, pos, {
-  chatId: '={{ $env.TELEGRAM_CHAT_ID }}', text, additionalFields: { appendAttribution: false },
+  chatId: '={{ $env.TELEGRAM_CHAT_ID }}', text, additionalFields: { appendAttribution: false, parse_mode: 'HTML' },
 });
+const esc = (expr) => `{{ String(${expr}).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}`;
 const link = (from, to, outputIndex = 0) => ({ from, to, outputIndex });
 function connections(links) {
   const c = {};
@@ -42,7 +46,7 @@ const wfs = [];
 // WF0: any failed production execution -> Telegram.
 wfs.push(workflow('wf0', 'WF0 Errors', [
   node('wf0', 'Error Trigger', 'n8n-nodes-base.errorTrigger', 1, [0, 0], {}),
-  telegram('wf0', 'Alert on Telegram', '=⚠️ n8n: {{ $json.workflow.name }} failed at "{{ $json.execution.lastNodeExecuted }}"\n{{ $json.execution.error.message }}\n{{ $json.execution.url }}', [260, 0]),
+  telegram('wf0', 'Alert on Telegram', `=⚠️ n8n: ${esc('$json.workflow.name')} failed at "${esc('$json.execution.lastNodeExecuted')}"\n${esc('$json.execution.error.message')}\n${esc('$json.execution.url')}`, [260, 0]),
 ], [link('Error Trigger', 'Alert on Telegram')]));
 
 // WF1: daily topic discovery at 05:00 UTC.
@@ -60,7 +64,7 @@ wfs.push(workflow('wf2', 'WF2 Produce', [
     mode: 'manual', assignments: { assignments: [{ id: uid('wf2:batch'), name: 'batch', value: 1, type: 'number' }] }, options: {},
   }),
   post('wf2', 'Start production', `${W}/produce`, [480, 80], '={{ JSON.stringify({ batch: $json.batch }) }}', { onError: 'continueErrorOutput' }),
-  telegram('wf2', 'Worker unreachable', '=⚠️ WF2 could not reach the render worker: {{ $json.error?.message ?? $json.message ?? "no answer" }}\nCheck it with: docker compose ps', [740, 180]),
+  telegram('wf2', 'Worker unreachable', `=⚠️ WF2 could not reach the render worker: ${esc('$json.error?.message ?? $json.message ?? "no answer"')}\nCheck it with: docker compose ps`, [740, 180]),
 ], [
   link('Every day 07:00 and 15:00 UTC', 'Settings'), link('Run manually', 'Settings'),
   link('Settings', 'Start production'), link('Start production', 'Worker unreachable', 1),
