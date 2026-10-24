@@ -73,6 +73,14 @@ function scaleGroupSlots(groups: ScaleGroup[]): Slot[] {
   return slots;
 }
 
+// Plain backup lines for contenders, in different shapes, for when the model's line fails a check.
+const CONTENDER_LINES: ((name: string, rank: number, value: string) => string)[] = [
+  (n, r, v) => `${The(n)} ranks number ${r}, with ${v}.`,
+  (n, r, v) => `Number ${r} is ${the(n)}: ${v}.`,
+  (n, r, v) => `Then comes ${the(n)}, at ${v}, in number ${r}.`,
+  (n, r, v) => `${The(n)} has ${v}. That is number ${r}.`,
+];
+
 const withUnit = (display: string, unit: string) => (/^[\d.,]+$/.test(display) ? `${display} ${unit}` : display);
 
 // Big countries people tend to guess. Each video uses a different one (picked from the dataset
@@ -123,7 +131,7 @@ const contenderSlots = ({ f, u }: Ctx, from: number, visual: (iso: string) => st
     brief: `${the(c.name)} is number ${c.rank} with ${withUnit(c.display, u)}. ${ANGLES.at(i % ANGLES.length)}`,
     country: c.name,
     numbers: [c.display, String(c.rank)],
-    fallback: `${The(c.name)} ranks number ${c.rank}, with ${withUnit(c.display, u)}.`,
+    fallback: CONTENDER_LINES[i % CONTENDER_LINES.length](c.name, c.rank, withUnit(c.display, u)),
     visual: visual(c.iso3),
     on_screen: `#${c.rank} ${c.name}`,
   }));
@@ -345,7 +353,13 @@ const phrases = (line: string) => {
   const w = line.toLowerCase().replace(/[^a-z' ]/g, ' ').split(/\s+/).filter(Boolean);
   return new Set(w.slice(2).map((_, i) => w.slice(i, i + 3).join(' ')));
 };
-const overused = (line: string, seen: Map<string, number>) => [...phrases(line)].some((p) => (seen.get(p) ?? 0) >= 2);
+// Phrases the plan itself repeats (the unit, "cattle per person", is in every slot) don't count.
+const overused = (line: string, seen: Map<string, number>, planned: Set<string>) => [...phrases(line)].some((p) => !planned.has(p) && (seen.get(p) ?? 0) >= 2);
+function plannedPhrases(slots: Slot[]): Set<string> {
+  const count = new Map<string, number>();
+  for (const s of slots) phrases(`${s.brief} ${s.fallback}`).forEach((p) => count.set(p, (count.get(p) ?? 0) + 1));
+  return new Set([...count].filter(([, n]) => n >= 2).map(([p]) => p));
+}
 const remember = (line: string, seen: Map<string, number>) => phrases(line).forEach((p) => seen.set(p, (seen.get(p) ?? 0) + 1));
 
 export async function writePlanned(system: string, slots: Slot[], topName: string, fixHint?: string, onStep: (s: string) => void = () => {}): Promise<Script> {
@@ -354,9 +368,10 @@ export async function writePlanned(system: string, slots: Slot[], topName: strin
   const lines = Array.isArray(out.lines) ? out.lines : [];
   const fixed: string[] = [];
   const seen = new Map<string, number>(); // three-word phrase -> lines that used it
+  const planned = plannedPhrases(slots);
   const beats: Beat[] = slots.map((s, i) => {
     let problem = lineProblem(lines[i], s, topName);
-    if (!problem && overused(String(lines[i]), seen)) problem = 'repeats a phrase';
+    if (!problem && overused(String(lines[i]), seen, planned)) problem = 'repeats a phrase';
     if (!problem) remember(String(lines[i]), seen);
     if (problem && s.role !== 'fixed') fixed.push(`${i + 1} (${problem})`);
     // filler: planned beats repeat a pattern on purpose, so the repeat check skips them.
