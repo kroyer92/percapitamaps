@@ -2,7 +2,23 @@ import { config } from './config.js';
 
 interface ChatOpts { temperature: number; system: string; user: string; numPredict?: number }
 
+// "fetch failed" alone says nothing; add the address, the low-level reason and how long it ran.
+function explain(e: any, base: string, started: number): Error {
+  const c = e?.cause;
+  const why = c ? [c.code, c.message].filter(Boolean).join(' ') : '';
+  return new Error(`${e?.message ?? e}${why ? ` (${why})` : ''} at ${base} after ${Math.round((Date.now() - started) / 1000)} s`);
+}
+
 async function chatAt(base: string, o: ChatOpts): Promise<string> {
+  const started = Date.now();
+  try {
+    return await chatOnce(base, o);
+  } catch (e) {
+    throw explain(e, base, started);
+  }
+}
+
+async function chatOnce(base: string, o: ChatOpts): Promise<string> {
   const res = await fetch(`${base}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -40,16 +56,16 @@ async function chatAt(base: string, o: ChatOpts): Promise<string> {
 // (for example when OLLAMA_URL points at the PC and the PC is off).
 export async function chatJson<T>(o: ChatOpts): Promise<T> {
   const bases = [...new Set([config.ollamaUrl, config.ollamaFallbackUrl])];
-  let lastErr: unknown;
+  const errors: string[] = [];
   for (const base of bases) {
     try {
       const text = await chatAt(base, o);
       return parseJson<T>(text);
-    } catch (e) {
-      lastErr = e;
+    } catch (e: any) {
+      errors.push(e?.message ?? String(e));
     }
   }
-  throw lastErr;
+  throw new Error(errors.join(' | '));
 }
 
 export function parseJson<T>(text: string): T {

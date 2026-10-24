@@ -35,6 +35,7 @@ app.post('/discover', (_req, res) => {
       const r = await discover();
       console.log(`[discover] ${r.signals} signals, ${r.inserted} new topics, ${r.skipped.length} skipped`);
     } catch (e: any) {
+      console.error("[discover] failed:", e.message);
       await alert(`WF1 Discover failed: ${e.message}`);
     }
   });
