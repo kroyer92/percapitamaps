@@ -79,7 +79,7 @@ async function claimTopic(preferred: Format) {
   );
 }
 
-export async function produceOne(): Promise<number | undefined> {
+export async function produceOne(skips = 0): Promise<number | undefined> {
   const preferred = await pickFormat();
   const topic = await claimTopic(preferred);
   if (!topic) {
@@ -107,6 +107,15 @@ export async function produceOne(): Promise<number | undefined> {
       await q('UPDATE jobs SET format = $2 WHERE id = $1', [id, format]);
     }
     await q('UPDATE jobs SET facts = $2 WHERE id = $1', [id, facts]);
+    // A ranking needs a clear #1. When the top countries share the same value (internet use: many
+    // countries at 100%), there is no story, so the topic is dropped and the next one is tried.
+    const tied = facts.ranking.filter((r) => r.display === facts.ranking[0]?.display).length;
+    if (format !== 'SCALE' && tied >= 2) {
+      await q(`UPDATE jobs SET status = 'skipped', error = $2, updated_at = now() WHERE id = $1`, [id, `top ${tied} tied at ${facts.ranking[0].display}`]);
+      await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [topic.id]);
+      await alert(`Skipped "${topic.question}": the top ${tied} countries are all at ${facts.ranking[0].display}, so there is no #1.${skips < 2 ? ' Trying the next topic.' : ''}`);
+      return skips < 2 ? produceOne(skips + 1) : undefined;
+    }
     const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined });
     await q(
       `UPDATE jobs SET script = $2, hooks = $3, packaging = $4, critic = $5, chosen_hook = $6, hook_type = $7, status = 'rendering', updated_at = now() WHERE id = $1`,
