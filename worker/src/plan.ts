@@ -149,15 +149,18 @@ function closerSlot({ f, top }: Ctx, visual: string): Slot | undefined {
       on_screen: `${f.threshold.count} countries`,
     };
   }
-  if (f.top_vs_median) {
+  // The reveal already gives the multiple of the median, so the closer contrasts the top with the
+  // bottom instead of saying the same thing twice.
+  const last = f.ranking.at(-1);
+  if (last && last.iso3 !== top.iso3) {
     return {
       role: 'closer',
-      brief: `A closing line: ${the(top.name)} has ${f.top_vs_median} the world median of ${f.world_median}. End on that contrast, so the video can loop back to the question.`,
-      country: top.name,
-      numbers: [...numbersIn(f.top_vs_median), f.world_median],
-      fallback: `That is ${f.top_vs_median} the world median.`,
+      brief: `A closing line: at the other end, ${the(last.name)} has just ${withUnit(last.display, f.unit)}. End on that contrast, so the video can loop back to the question.`,
+      country: last.name,
+      numbers: [last.display],
+      fallback: `At the other end, ${the(last.name)} has just ${withUnit(last.display, f.unit)}.`,
       visual,
-      on_screen: `${f.top_vs_median} the median`,
+      on_screen: `Last: ${last.name} ${last.display}`,
     };
   }
   return undefined;

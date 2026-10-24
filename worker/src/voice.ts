@@ -6,7 +6,9 @@ import { lastJsonLine, run } from './lib/proc.js';
 // Spell out what the voice engine would otherwise misread.
 export function speakable(text: string): string {
   return text
-    .replace(/\$(\d[\d,.]*)\s*(trillion|billion|million)?/g, (_m, n, big) => `${n}${big ? ' ' + big : ''} dollars`)
+    // "$2,760." -> "2,760 dollars." The number must not swallow the comma or full stop after it,
+    // or the voice says "2,760. Dollars" and the next word gets glued on ("dollarsway").
+    .replace(/\$(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(\s+(?:trillion|billion|million))?/g, (_m, n, dec, big) => `${n}${dec ?? ''}${big ?? ''} dollars`)
     .replace(/(\d)\s*%/g, '$1 percent')
     .replace(/(\d)\s*°C/g, '$1 degrees')
     .replace(/CO₂/g, 'C O 2')
@@ -59,7 +61,8 @@ export function wordDiff(expected: string, heard: string): { wer: number; mistak
   // Numbers are left out: Whisper writes them in many ways ("1.44", "1. 44", "one point four
   // four"), and the script's numbers are already checked against the data elsewhere.
   const NUMBER = /^(\d+|point|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|trillion)$/;
-  const norm = (s: string) => speakable(s).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w && !NUMBER.test(w));
+  // "dollars" goes too: Whisper writes "$2,760 dollars" for "2,760 dollars", so it would count twice.
+  const norm = (s: string) => speakable(s).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w && !NUMBER.test(w) && !/^dollars?$/.test(w));
   const a = norm(expected);
   const b = norm(heard);
   const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
