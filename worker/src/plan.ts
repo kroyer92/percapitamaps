@@ -55,7 +55,7 @@ function scaleGroupSlots(groups: ScaleGroup[]): Slot[] {
       role: 'group',
       brief: `${names} would have ${m.people}${both ? ' each' : ''} of the 100. ${shape.brief}`,
       country: m.names[0],
-      numbers: [String(m.people)],
+      numbers: [String(m.people), '100'], // the first is required; "of the 100" is fine
       fallback: line[0].toUpperCase() + line.slice(1),
       visual: 'scale_grid',
       on_screen: `${m.names.join(' + ')}: ${m.people}${both ? ' each' : ''}`,
@@ -65,7 +65,7 @@ function scaleGroupSlots(groups: ScaleGroup[]): Slot[] {
   if (rest) slots.push({
     role: 'group',
     brief: `Everyone else in the world shares the last ${rest.people}. Make the contrast land.`,
-    numbers: [String(rest.people)],
+    numbers: [String(rest.people), '100'],
     fallback: `The whole rest of the world shares just ${rest.people}.`,
     visual: 'scale_grid',
     on_screen: `Rest of the world: ${rest.people}`,
@@ -255,7 +255,8 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
     const what = f.title.toLowerCase();
     const [g1, g2] = groups.filter((g) => g.iso3);
     return keep([
-      hookSlot(c, 'scale_grid'),
+      // The hook may say "100": the whole picture is built on it.
+      { ...hookSlot(c, 'scale_grid'), numbers: ['100'], brief: `A hook of at most 9 words that makes the viewer want the answer to: "${c.question}". Do not name any country. The only number you may use is 100.` },
       {
         role: 'then',
         brief: `Set up the picture: shrink the whole world's ${what} down to just 100.`,
