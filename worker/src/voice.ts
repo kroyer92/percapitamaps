@@ -53,8 +53,9 @@ export async function transcribe(audio: string): Promise<Word[]> {
   return lastJsonLine<{ words: Word[] }>(stdout).words;
 }
 
-// Word error rate between what the script says and what Whisper heard.
-export function wordErrorRate(expected: string, heard: string): number {
+// Word error rate between what the script says and what Whisper heard, plus the mismatches
+// ("said X, heard Y"), so a failed check shows what went wrong.
+export function wordDiff(expected: string, heard: string): { wer: number; mistakes: string[] } {
   // Numbers are left out: Whisper writes them in many ways ("1.44", "1. 44", "one point four
   // four"), and the script's numbers are already checked against the data elsewhere.
   const NUMBER = /^(\d+|point|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|trillion)$/;
@@ -66,5 +67,25 @@ export function wordErrorRate(expected: string, heard: string): number {
   for (let i = 1; i <= a.length; i++)
     for (let j = 1; j <= b.length; j++)
       d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-  return a.length ? d[a.length][b.length] / a.length : 0;
+  // Walk back through the table, grouping neighbouring edits into one "said / heard" pair.
+  const mistakes: string[] = [];
+  let said: string[] = [];
+  let got: string[] = [];
+  const flush = () => {
+    if (said.length || got.length) mistakes.unshift(`said "${said.join(' ') || '—'}", heard "${got.join(' ') || '—'}"`);
+    said = []; got = [];
+  };
+  let i = a.length, j = b.length;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i - 1] === b[j - 1] && d[i][j] === d[i - 1][j - 1]) { flush(); i--; j--; }
+    else if (i > 0 && j > 0 && d[i][j] === d[i - 1][j - 1] + 1) { said.unshift(a[--i]); got.unshift(b[--j]); }
+    else if (i > 0 && d[i][j] === d[i - 1][j] + 1) said.unshift(a[--i]);
+    else got.unshift(b[--j]);
+  }
+  flush();
+  return { wer: a.length ? d[a.length][b.length] / a.length : 0, mistakes };
+}
+
+export function wordErrorRate(expected: string, heard: string): number {
+  return wordDiff(expected, heard).wer;
 }

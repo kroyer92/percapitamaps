@@ -10,6 +10,7 @@
     "check-datasets": "tsx src/cli/check-datasets.ts",
     "test-render": "tsx src/cli/test-render.ts",
     "voice-test": "tsx src/cli/voice-test.ts",
+    "voice-check": "tsx src/cli/voice-check.ts",
     "produce": "tsx src/cli/produce.ts",
     "typecheck": "tsc --noEmit",
     "seed-sql": "tsx src/cli/seed-sql.ts"
