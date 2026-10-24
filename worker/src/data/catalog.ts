@@ -26,6 +26,7 @@ export interface CatalogEntry {
   threshold?: { value: number; label: string };
   minCountries?: number;
   lowerIsNews?: boolean;  // the interesting end of the ranking is the bottom
+  yearPrefix?: string;    // when the year is not the measuring year, e.g. 'born ' for height by birth year
 }
 
 const wb = (indicator: string): SourceRef => ({ kind: 'worldbank', indicator });
@@ -105,8 +106,8 @@ export const CATALOG: CatalogEntry[] = [
   { id: 'wb_tertiary', title: 'College and university enrolment', unit: 'percent of the college-age population', topic: 'people', grp: 'education', ref: wb('SE.TER.ENRR'), sourceName: 'World Bank WDI / UNESCO', license: WB_LIC, suffix: '%', minCountries: 80 },
   { id: 'wb_literacy', title: 'Adults who can read and write', unit: 'percent of adults', topic: 'people', grp: 'education', ref: wb('SE.ADT.LITR.ZS'), sourceName: 'World Bank WDI / UNESCO', license: WB_LIC, suffix: '%', minCountries: 30, lowerIsNews: true },
   { id: 'owid_schooling_years', title: 'Average years of schooling', unit: 'years', topic: 'people', grp: 'education', ref: owid('mean-years-of-schooling-long-run', 'mean-years-of-schooling'), sourceName: 'Our World in Data / UNDP', license: OWID_LIC, decimals: 1, suffix: ' years' },
-  { id: 'owid_height_men', title: 'Average height of men', unit: 'centimetres', topic: 'people', grp: 'height', ref: owid('average-height-of-men'), sourceName: 'Our World in Data / NCD-RisC', license: OWID_LIC, decimals: 1, suffix: ' cm' },
-  { id: 'owid_height_women', title: 'Average height of women', unit: 'centimetres', topic: 'people', grp: 'height', ref: owid('average-height-of-women'), sourceName: 'Our World in Data / NCD-RisC', license: OWID_LIC, decimals: 1, suffix: ' cm' },
+  { id: 'owid_height_men', title: 'Average height of men', unit: 'centimetres', topic: 'people', grp: 'height', ref: owid('average-height-of-men'), sourceName: 'Our World in Data / NCD-RisC', license: OWID_LIC, decimals: 1, suffix: ' cm', yearPrefix: 'born ' },
+  { id: 'owid_height_women', title: 'Average height of women', unit: 'centimetres', topic: 'people', grp: 'height', ref: owid('average-height-of-women'), sourceName: 'Our World in Data / NCD-RisC', license: OWID_LIC, decimals: 1, suffix: ' cm', yearPrefix: 'born ' },
   { id: 'owid_hdi', title: 'Human Development Index', unit: 'index points (0 to 1)', topic: 'people', grp: 'society', ref: owid('human-development-index'), sourceName: 'Our World in Data / UNDP', license: 'CC BY 3.0 IGO', decimals: 3 },
   { id: 'owid_population_long', title: 'Population over the centuries', unit: 'people', topic: 'people', grp: 'population', ref: owid('population'), sourceName: 'Our World in Data / UN WPP, HYDE, Gapminder', license: OWID_LIC, additive: true },
 

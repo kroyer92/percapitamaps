@@ -32,7 +32,7 @@ export function buildProps(format: Format, facts: Facts, ds: Pick<CatalogEntry, 
   const props: ShortProps = {
     format,
     durationInFrames,
-    kicker: `${facts.title} · ${facts.year}`,
+    kicker: `${facts.title} · ${facts.year_text ?? facts.year}`,
     beats,
     ranking,
     map: facts.map,

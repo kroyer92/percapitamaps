@@ -14,6 +14,7 @@ export interface Facts {
   title: string;
   unit: string;
   year: number;
+  year_text: string; // how the year is shown: "2023", or "born 1996" for height
   countries_count: number;
   source_line: string;
   source_url: string;
@@ -131,8 +132,9 @@ export function buildFacts({ ds, series, population, format }: BuildInput): Fact
     title: ds.title,
     unit: ds.unit,
     year,
+    year_text: `${ds.yearPrefix ?? ''}${year}`,
     countries_count: n,
-    source_line: `Data: ${ds.sourceName}, ${year}, ${ds.license}`,
+    source_line: `Data: ${ds.sourceName}, ${ds.yearPrefix ?? ''}${year}, ${ds.license}`,
     source_url: ds.source_url ?? series.url,
     license: ds.license,
     ranking,
@@ -258,7 +260,7 @@ export function factsForLlm(f: Facts, format: Format): Record<string, unknown> {
   const out: Record<string, unknown> = {
     measure: f.title,
     unit: f.unit,
-    year: String(f.year),
+    year: f.year_text ?? String(f.year),
     countries_ranked: String(f.countries_count),
     top10: f.ranking.slice(0, 10).map((r) => ({ rank: String(r.rank), country: r.name, code: r.iso3, value: r.display })),
     bottom5: f.ranking.slice(-5).map((r) => ({ rank: String(r.rank), country: r.name, code: r.iso3, value: r.display })),
