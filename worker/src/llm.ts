@@ -8,7 +8,9 @@ async function chatAt(base: string, o: ChatOpts): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: config.ollamaModel,
-      stream: false,
+      // Streamed: Node's fetch gives up after 5 minutes without response headers ("fetch failed"),
+      // and a long answer on the CPU takes longer than that. Streaming sends headers at once.
+      stream: true,
       think: false,
       format: 'json',
       keep_alive: '2m',
@@ -21,8 +23,17 @@ async function chatAt(base: string, o: ChatOpts): Promise<string> {
     signal: AbortSignal.timeout(15 * 60_000),
   });
   if (!res.ok) throw new Error(`Ollama ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const json: any = await res.json();
-  return json.message?.content ?? '';
+  let text = '';
+  let buf = '';
+  const decoder = new TextDecoder();
+  for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+    buf += decoder.decode(chunk, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() ?? '';
+    for (const line of lines) if (line.trim()) text += JSON.parse(line).message?.content ?? '';
+  }
+  if (buf.trim()) text += JSON.parse(buf).message?.content ?? '';
+  return text;
 }
 
 // Ask the model for JSON. Tries OLLAMA_URL first and OLLAMA_FALLBACK_URL if it is down
