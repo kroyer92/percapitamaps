@@ -99,7 +99,10 @@ export function buildDescription(p: Packaging, facts: Facts, musicCredit?: strin
   ].filter((l, i, arr) => l !== '' || arr[i - 1] !== '').join('\n').trim();
 }
 
-export function seriesTitle(title: string, format: Format, n?: number): string {
+// The final YouTube title. The model often copies a search phrase in lower case
+// ("where can $100 buy the most?"), so the first letter is always made a capital.
+export function seriesTitle(raw: string, format: Format, n?: number): string {
+  const title = raw.replace(/^\s*(\p{Ll})/u, (_m, c: string) => c.toUpperCase());
   if (!config.seriesNaming || !n) return title;
   return `${title} | ${FORMAT_NAMES[format].replace('If the World Were 100 People', '100 People')} #${n}`;
 }
@@ -167,6 +170,7 @@ export async function generateContent(opts: {
     onStep('Writing the title and description');
     const pk = await chatJson<Packaging>({ temperature: 0.6, system, user: P.packagingUser(question, script.beats[0].vo, facts.source_line) });
     pk.title = (pk.title ?? question).replace(/#\S+/g, '').trim().slice(0, 70);
+    pk.title = pk.title.replace(/^(\p{Ll})/u, (c) => c.toUpperCase());
     pk.hashtags = (pk.hashtags ?? ['#shorts', '#maps', '#geography']).slice(0, 3);
     pk.search_tags = (pk.search_tags ?? []).slice(0, 10);
     pk.ig_hashtags = (pk.ig_hashtags ?? []).slice(0, 5);
