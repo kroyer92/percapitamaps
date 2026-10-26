@@ -64,11 +64,22 @@ export async function chatJson<T>(o: ChatOpts): Promise<T> {
   const bases = [...new Set([config.ollamaUrl, config.ollamaFallbackUrl])];
   const errors: string[] = [];
   for (const base of bases) {
-    try {
-      const text = await chatAt(base, o);
-      return parseJson<T>(text);
-    } catch (e: any) {
-      errors.push(e?.message ?? String(e));
+    // The model sometimes writes broken JSON (a stray quote inside a string). That is a bad draw,
+    // not a broken server, so ask the same server again, up to 3 tries, before giving up.
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      let text: string;
+      try {
+        text = await chatAt(base, attempt === 1 ? o : { ...o, temperature: Math.min(1, o.temperature + 0.1 * attempt) });
+      } catch (e: any) {
+        errors.push(e?.message ?? String(e));
+        break; // server problem: try the next address
+      }
+      try {
+        return parseJson<T>(text);
+      } catch (e: any) {
+        console.warn(`[llm] broken JSON on try ${attempt} of 3: ${e.message}`);
+        if (attempt === 3) errors.push(`model wrote broken JSON 3 times (${e.message})`);
+      }
     }
   }
   throw new Error(errors.join(' | '));
