@@ -50,7 +50,7 @@ const res = await renderShort({
 });
 step(`Rendered ${res.seconds.toFixed(1)} s with voice ${voice}`);
 step('Checking the video (the first run also downloads the speech checker, about 500 MB)');
-const qa = await runQa({ video: out, voiceTrack: path.join(workDir, 'voice.wav'), beats: res.props.beats, fps: 30, sourceLine: facts.source_line, license: facts.license, numbersOk: true, criticVerdict: content.critic.verdict });
+const qa = await runQa({ video: out, voiceTrack: path.join(workDir, 'voice.wav'), beats: res.props.beats, fps: 30, sourceLine: facts.source_line, license: facts.license, numbersOk: true, criticVerdict: content.critic.verdict, heard: res.heard });
 await fs.writeFile(path.join(config.rendersDir, `test-${key}.qa.json`), JSON.stringify({ concept: key, title: content.packaging.title, hooks: content.hooks, qa }, null, 2));
 step('QA:');
 for (const c of qa.checks) console.log(`         ${c.status.toUpperCase().padEnd(4)} ${c.name}: ${c.detail}`);

@@ -8,7 +8,7 @@ import { iso3ToIso2 } from './data/countries.js';
 import { formatValue, type Facts } from './facts.js';
 import type { CatalogEntry } from './data/catalog.js';
 import type { Beat } from './validate.js';
-import { synthesize, type VoiceClip } from './voice.js';
+import { synthesize, transcribe, type VoiceClip, type Word } from './voice.js';
 import { place, timedBeats, FPS } from './timeline.js';
 import { buildVoiceTrack, finalMix, pickMusic, type MusicPick } from './audio.js';
 import { buildSfxTrack } from './sfx.js';
@@ -65,7 +65,7 @@ export function buildProps(format: Format, facts: Facts, ds: Pick<CatalogEntry, 
   return props;
 }
 
-export interface RenderResult { video: string; seconds: number; props: ShortProps; music?: MusicPick; clips: VoiceClip[] }
+export interface RenderResult { video: string; seconds: number; props: ShortProps; music?: MusicPick; clips: VoiceClip[]; heard?: Word[] }
 
 export async function renderShort(opts: {
   workDir: string;
@@ -95,12 +95,21 @@ export async function renderShort(opts: {
 
   const { placed, seconds } = place(opts.beats, clips);
   opts.onStep?.(`Voice recorded: ${clips.length} clips`);
-  const durationInFrames = Math.ceil(seconds * FPS);
-  const props = buildProps(opts.format, opts.facts, opts.ds, timedBeats(placed, seconds), durationInFrames);
-  await fs.writeFile(path.join(workDir, 'props.json'), JSON.stringify(props));
-
   const voiceTrack = path.join(workDir, 'voice.wav');
   await buildVoiceTrack(placed, seconds, voiceTrack);
+
+  // Time the captions from what the voice actually says. QA reuses these words for its speech check.
+  let heard: Word[] | undefined;
+  try {
+    opts.onStep?.('Timing the captions from the voice');
+    heard = await transcribe(voiceTrack);
+  } catch (e: any) {
+    opts.onStep?.(`Caption timing fell back to estimates: ${String(e.message).slice(0, 120)}`);
+  }
+
+  const durationInFrames = Math.ceil(seconds * FPS);
+  const props = buildProps(opts.format, opts.facts, opts.ds, timedBeats(placed, seconds, heard), durationInFrames);
+  await fs.writeFile(path.join(workDir, 'props.json'), JSON.stringify(props));
 
   opts.onStep?.('Starting the video renderer (the first run may download Chrome)');
   const url = await serveUrl();
@@ -126,5 +135,5 @@ export async function renderShort(opts: {
   await fs.mkdir(path.dirname(outFile), { recursive: true });
   await finalMix(silent, voiceTrack, music, seconds, outFile, sfx);
   await fs.rm(silent, { force: true });
-  return { video: outFile, seconds, props, music, clips };
+  return { video: outFile, seconds, props, music, clips, heard };
 }

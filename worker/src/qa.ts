@@ -1,7 +1,7 @@
 // The automatic part of the QA gate (plan section B4). Fails block the video; warnings
 // are shown to you in the Telegram preview.
 import { run } from './lib/proc.js';
-import { transcribe, wordDiff } from './voice.js';
+import { transcribe, wordDiff, type Word } from './voice.js';
 import { licenseVerdict } from './data/fetch.js';
 import type { TimedBeat } from '../remotion/types.js';
 
@@ -45,6 +45,7 @@ export async function runQa(opts: {
   numbersOk: boolean;
   criticVerdict?: string;
   skipWhisper?: boolean;
+  heard?: Word[]; // already transcribed by the render (caption timing)
 }): Promise<QaReport> {
   const checks: Check[] = [];
   const add = (name: string, status: Status, detail: string) => checks.push({ name, status, detail });
@@ -80,7 +81,7 @@ export async function runQa(opts: {
 
   if (!opts.skipWhisper) {
     try {
-      const words = await transcribe(opts.voiceTrack);
+      const words = opts.heard ?? (await transcribe(opts.voiceTrack));
       const heard = words.map((w) => w.word).join(' ');
       const { wer, mistakes } = wordDiff(opts.beats.map((b) => b.vo).join(' '), heard);
       const shown = wer > 0.05 && mistakes.length ? `; ${mistakes.slice(0, 6).join('; ')}${mistakes.length > 6 ? ` (+${mistakes.length - 6} more)` : ''}` : '';
