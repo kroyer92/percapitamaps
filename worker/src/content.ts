@@ -4,7 +4,7 @@ import { config, FORMAT_NAMES, type Format } from './config.js';
 import { chatJson } from './llm.js';
 import { factsForLlm, type Facts } from './facts.js';
 import * as P from './prompts.js';
-import { planFor, writePlanned } from './plan.js';
+import { planFor, writePlanned, type Slot } from './plan.js';
 import { allowedNumbers, checkScript, isMinor, type Filler, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
 
 export interface Hook { type: string; text: string }
@@ -59,6 +59,32 @@ async function writeScript(question: string, format: Format, system: string, all
   throw new NeedsHuman('The script failed the code checks three times.', last);
 }
 
+// The code already checked every number against FACTS, and the code is right about numbers more
+// often than a small model reading a long JSON. So a number_not_in_facts complaint only stands when
+// the code agrees; when it was the only complaint, the script passes.
+function trustCodeOnNumbers(critic: Critic, script: Script, pk: Packaging, allowed: Set<string>): void {
+  critic.issues = Array.isArray(critic.issues) ? critic.issues : [];
+  const texts = [...script.beats.flatMap((b) => [b.vo, b.on_screen]), pk.title, pk.summary, pk.pinned_comment, pk.ig_caption];
+  const numbersOk = texts.every((t) => checkText('', String(t ?? ''), allowed).length === 0);
+  if (!numbersOk) return;
+  const before = critic.issues.length;
+  critic.issues = critic.issues.filter((i) => i.type !== 'number_not_in_facts');
+  if (before && !critic.issues.length && critic.verdict !== 'pass') {
+    critic.verdict = 'pass';
+    critic.fix_hint = 'Overruled: every number was checked against FACTS in code.';
+  }
+}
+
+function usePlainLines(critic: Critic, script: Script, slots: Slot[], pk: Packaging, question: string): void {
+  const beats = critic.issues.map((i) => Number(i.beat)).filter((b) => b >= 1 && b <= slots.length);
+  // No beat named (or a packaging issue): every line goes plain, and the title falls back too.
+  const all = beats.length < critic.issues.length;
+  slots.forEach((s, i) => { if (all || beats.includes(i + 1)) script.beats[i].vo = s.fallback; });
+  if (all) { pk.title = question.slice(0, 70); pk.summary = question; }
+  critic.verdict = 'pass';
+  critic.fix_hint = `Plain lines used for ${all ? 'every beat' : `beat ${beats.join(', ')}`} after the critic failed twice.`;
+}
+
 export function buildDescription(p: Packaging, facts: Facts, musicCredit?: string): string {
   return [
     p.summary,
@@ -86,10 +112,16 @@ export async function generateContent(opts: {
   lengthBand?: string;
   hookType?: string;
   onStep?: (s: string) => void;
+  recentLines?: string[][]; // spoken lines of the last few videos, so wording doesn't repeat
 }): Promise<Content> {
   const { question, format, facts } = opts;
   const onStep = opts.onStep ?? (() => {});
-  const llmFacts = factsForLlm(facts, format);
+  // The plan only depends on the facts, so it is made first: every country it names (the guess
+  // may be Russia at #14) then goes into FACTS, where the writer and the critic can see its number.
+  const slots = planFor(format, question, facts);
+  const named = new Set((slots ?? []).map((sl) => sl.country).filter(Boolean));
+  const mentioned = facts.ranking.filter((r) => named.has(r.name)).map((r) => r.iso3);
+  const llmFacts = factsForLlm(facts, format, mentioned);
   const system = P.contentSystem(JSON.stringify(llmFacts));
   const allowed = allowedNumbers(llmFacts, question);
   const words = wordsFor(opts.lengthBand);
@@ -108,11 +140,10 @@ export async function generateContent(opts: {
     // The planned writer: the code fixes the story, the model writes the lines. A format the
     // code can't plan (missing facts) falls back to asking the model for the whole script.
     let script: Script;
-    const slots = planFor(format, question, facts);
     if (slots) {
       // Slot numbers are computed from the facts (e.g. two groups added up), so they are allowed too.
       for (const sl of slots) for (const n of sl.numbers) for (const x of numbersIn(n)) allowed.add(x);
-      script = await writePlanned(system, slots, spoiler?.name ?? '', fixHint, onStep);
+      script = await writePlanned(system, slots, spoiler?.name ?? '', fixHint, onStep, opts.recentLines, facts.ranking.map((r) => r.name));
       // The plan sets the length, so only real problems (numbers, codes) stop a planned script.
       const left = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, fillers)
         .filter((e) => !isMinor(e) && !e.startsWith('Total spoken words'));
@@ -144,6 +175,13 @@ export async function generateContent(opts: {
 
     onStep('Fact-checking');
     const critic = await chatJson<Critic>({ temperature: 0.1, system, user: P.criticUser(JSON.stringify(script.beats), JSON.stringify(pk)) });
+    trustCodeOnNumbers(critic, script, pk, allowed);
+    if (critic.verdict !== 'pass' && round === 1 && slots) {
+      // Second fail on a planned script: swap the flagged lines for the plan's plain lines, which
+      // are built from the facts in code, instead of sending the topic to dead letter.
+      onStep(`Critic failed again; using plain lines for: ${critic.issues.map((i) => i.beat ?? 'packaging').join(', ')}`);
+      usePlainLines(critic, script, slots, pk, question);
+    }
     if (critic.verdict === 'pass') {
       return { script, originalHook, hooks, chosenHook: chosen, hookType: chosen >= 0 ? hooks[chosen].type : 'SCRIPT', packaging: pk, critic };
     }

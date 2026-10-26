@@ -116,7 +116,10 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
       await alert(`Skipped "${topic.question}": the top ${tied} countries are all at ${facts.ranking[0].display}, so there is no #1.${skips < 2 ? ' Trying the next topic.' : ''}`);
       return skips < 2 ? produceOne(skips + 1) : undefined;
     }
-    const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined, onStep: (step) => console.log(`[job ${id}] ${step}`) });
+    // The last 10 scripts, so the writer can steer clear of wording they already used.
+    const recent = await q<{ script: Content['script'] }>(`SELECT script FROM jobs WHERE script IS NOT NULL AND id <> $1 ORDER BY id DESC LIMIT 10`, [id]);
+    const recentLines = recent.map((r) => (r.script?.beats ?? []).map((b) => b.vo ?? ''));
+    const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined, recentLines, onStep: (step) => console.log(`[job ${id}] ${step}`) });
     await q(
       `UPDATE jobs SET script = $2, hooks = $3, packaging = $4, critic = $5, chosen_hook = $6, hook_type = $7, status = 'rendering', updated_at = now() WHERE id = $1`,
       [id, content.script, { list: content.hooks, original: content.originalHook }, content.packaging, content.critic, content.chosenHook, content.hookType],

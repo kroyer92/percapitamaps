@@ -255,8 +255,10 @@ function buildGuess(ranking: RankRow[]): Facts['guess'] {
   };
 }
 
-// The compact view the language model sees: strings only, no raw arrays.
-export function factsForLlm(f: Facts, format: Format): Record<string, unknown> {
+// The compact view the language model sees: strings only, no raw arrays. `mentioned` lists the
+// countries the planned script names (e.g. the guess, Russia at #14), so a country outside the top
+// 10, bottom 5 and anchors still has its number in FACTS and the critic doesn't fail it.
+export function factsForLlm(f: Facts, format: Format, mentioned: string[] = []): Record<string, unknown> {
   const out: Record<string, unknown> = {
     measure: f.title,
     unit: f.unit,
@@ -267,6 +269,9 @@ export function factsForLlm(f: Facts, format: Format): Record<string, unknown> {
     world_median: f.world_median,
     anchors: Object.entries(f.anchors).map(([code, a]) => ({ country: a.name, code, rank: a.rank, of: a.of, value: a.value })),
   };
+  const shown = new Set([...f.ranking.slice(0, 10), ...f.ranking.slice(-5)].map((r) => r.iso3).concat(Object.keys(f.anchors)));
+  const others = f.ranking.filter((r) => mentioned.includes(r.iso3) && !shown.has(r.iso3));
+  if (others.length) out.other_countries = others.map((r) => ({ rank: String(r.rank), country: r.name, code: r.iso3, value: r.display }));
   if (f.top_vs_median) out.number_1_vs_median = f.top_vs_median;
   if (f.top_vs_usa) out.number_1_vs_united_states = f.top_vs_usa;
   if (f.threshold) out.threshold = { label: f.threshold.label, how_many_countries: f.threshold.count, countries: f.threshold.countries.slice(0, 15) };
