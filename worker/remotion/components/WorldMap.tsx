@@ -1,10 +1,10 @@
 import React, { useMemo } from 'react';
-import { geoEqualEarth, geoPath, geoBounds, geoCentroid } from 'd3-geo';
+import { geoEqualEarth, geoPath, geoCentroid } from 'd3-geo';
 import { feature } from 'topojson-client';
 import { interpolate, spring, useCurrentFrame, useVideoConfig, Easing } from 'remotion';
 import world from 'world-atlas/countries-50m.json';
 import { numericToIso3 } from '../iso';
-import { C, FONT, W, ZONE } from '../theme';
+import { C, FONT, MAP, W, ZONE } from '../theme';
 import type { TimedBeat } from '../types';
 
 type Feat = { type: 'Feature'; id: string; iso3?: string; geometry: any; properties: any };
@@ -13,8 +13,11 @@ const FEATURES: Feat[] = (feature(world as any, (world as any).objects.countries
   .filter((f: any) => f.id !== '010') // Antarctica
   .map((f: any) => ({ ...f, iso3: numericToIso3(String(f.id).padStart(3, '0')) }));
 
-const MAP_TOP = ZONE.visualTop + 40;
-const MAP_H = ZONE.visualBottom - ZONE.visualTop - 80;
+// At zoom 1 the whole world fits the screen width; the home view is zoomed past that, so the map
+// fills the phone and runs off both sides.
+const WORLD_H = 520;
+const projection = geoEqualEarth().fitExtent([[20, MAP.centreY - WORLD_H / 2], [W - 20, MAP.centreY + WORLD_H / 2]], { type: 'FeatureCollection', features: FEATURES } as any);
+const path = geoPath(projection);
 
 interface Camera { k: number; cx: number; cy: number } // zoom factor and the projected point at the centre
 
@@ -26,6 +29,26 @@ function quantileColors(map: Record<string, number>, ramp: string[]): Map<string
     out.set(iso, ramp[bin]);
   });
   return out;
+}
+
+// The main landmass of a country: overseas islands and territories (Alaska and Hawaii, French
+// Guiana, New Zealand's outlying islands) would otherwise make the zoom far too wide.
+function mainland(f: Feat): Feat {
+  if (f.geometry.type !== 'MultiPolygon') return f;
+  const polys = (f.geometry.coordinates as any[]).map((c) => ({ ...f, geometry: { type: 'Polygon', coordinates: c } }));
+  return polys.reduce((a, b) => (path.area(b as any) > path.area(a as any) ? b : a));
+}
+
+// A country fills most of the space between the headline and the captions.
+// `drop` moves it lower on screen, to make room for the answer's number above it.
+function camFor(iso?: string, drop = 0): Camera | undefined {
+  const f = iso ? FEATURES.find((x) => x.iso3 === iso) : undefined;
+  if (!f) return undefined;
+  const m = mainland(f);
+  const [[x0, y0], [x1, y1]] = path.bounds(m as any);
+  const [cx, cy] = projection(geoCentroid(m as any)) ?? [(x0 + x1) / 2, (y0 + y1) / 2];
+  const k = Math.max(1.8, Math.min(14, Math.min((W * 0.62) / Math.max(1, x1 - x0), 560 / Math.max(1, y1 - y0))));
+  return { k, cx, cy: cy - drop / k };
 }
 
 export interface MapCue { kind: 'fill' | 'zoom' | 'highlight' | 'reveal'; iso?: string; start: number }
@@ -44,6 +67,9 @@ export function mapCues(beats: TimedBeat[], highlightIso?: string): MapCue[] {
   return cues.sort((a, b) => a.start - b.start);
 }
 
+// Room above the answer country for its number (see AnswerNumber).
+export const ANSWER_DROP = 150;
+
 export const WorldMap: React.FC<{
   map: Record<string, number>;
   cues: MapCue[];
@@ -54,42 +80,47 @@ export const WorldMap: React.FC<{
   answerIso?: string;
 }> = ({ map, cues, labelFor, threshold, thresholdLabel, unit, answerIso }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
 
-  const { projection, early, order } = useMemo(() => {
-    const projection = geoEqualEarth().fitExtent([[20, MAP_TOP], [W - 20, MAP_TOP + MAP_H]], { type: 'FeatureCollection', features: FEATURES } as any);
-    // Only the blue end of the ramp: amber is kept for the answer.
-    const early = quantileColors(map, C.ramp.slice(0, 3));
+  const { colors, order } = useMemo(() => {
+    // Blue shades only: amber is kept for the answer.
+    const colors = quantileColors(map, C.blues);
     const order = new Map(Object.entries(map).sort((a, b) => a[1] - b[1]).map(([iso], i, arr) => [iso, i / arr.length]));
-    return { projection, early, order };
+    return { colors, order };
   }, [map]);
-  const path = geoPath(projection);
 
-  // Camera: zoom cues move it; a later highlight/reveal of a country off-screen pulls it back out.
-  const camFor = (iso?: string): Camera => {
-    const base = { k: 1, cx: W / 2, cy: MAP_TOP + MAP_H / 2 };
-    if (!iso) return base;
-    const f = FEATURES.find((x) => x.iso3 === iso);
-    if (!f) return base;
-    const [[x0, y0], [x1, y1]] = path.bounds(f as any);
-    const [cx, cy] = projection(geoCentroid(f as any)) ?? [(x0 + x1) / 2, (y0 + y1) / 2];
-    const k = Math.max(1.6, Math.min(5, Math.min((W * 0.55) / Math.max(1, x1 - x0), (MAP_H * 0.55) / Math.max(1, y1 - y0))));
-    return { k, cx, cy };
-  };
-  let from: Camera = { k: 1, cx: W / 2, cy: MAP_TOP + MAP_H / 2 };
-  let to = from;
+  // The home view drifts slowly west to east, so the map is moving from the first frame.
+  const home = (): Camera => ({
+    k: MAP.home + interpolate(frame, [0, durationInFrames], [0.08, 0]),
+    cx: W / 2 + interpolate(frame, [0, durationInFrames], [-150, 150]),
+    cy: MAP.centreY,
+  });
+
+  // Camera: zoom and highlight cues fly to the country, the reveal flies to the answer, and a
+  // fill cue goes back to the home view.
+  let from: () => Camera = home;
+  let to: () => Camera = home;
   let camStart = 0;
   for (const c of cues) {
     if (c.start > frame) break;
-    if (c.kind === 'zoom') { from = to; to = camFor(c.iso); camStart = c.start; }
-    if ((c.kind === 'fill' || c.kind === 'reveal') && to.k !== 1) { from = to; to = { k: 1, cx: W / 2, cy: MAP_TOP + MAP_H / 2 }; camStart = c.start; }
+    let next: (() => Camera) | undefined;
+    if (c.kind === 'zoom' || c.kind === 'highlight') { const cam = camFor(c.iso); if (cam) next = () => cam; }
+    if (c.kind === 'reveal') { const cam = camFor(c.iso, ANSWER_DROP); if (cam) next = () => cam; }
+    if (c.kind === 'fill' && c.start > 0) next = home;
+    if (next) { from = to; to = next; camStart = c.start; }
   }
   const t = spring({ frame: frame - camStart, fps, config: { damping: 200 }, durationInFrames: 24 });
-  const cam = { k: from.k + (to.k - from.k) * t, cx: from.cx + (to.cx - from.cx) * t, cy: from.cy + (to.cy - from.cy) * t };
-  const transform = `translate(${W / 2}, ${MAP_TOP + MAP_H / 2}) scale(${cam.k}) translate(${-cam.cx}, ${-cam.cy})`;
+  const a = from();
+  const b = to();
+  // Zoom on a log scale so a big zoom doesn't rush at the end.
+  const k = Math.exp(Math.log(a.k) + (Math.log(b.k) - Math.log(a.k)) * t);
+  const cam = { k, cx: a.cx + (b.cx - a.cx) * t, cy: a.cy + (b.cy - a.cy) * t };
+  const transform = `translate(${W / 2}, ${MAP.centreY}) scale(${cam.k}) translate(${-cam.cx}, ${-cam.cy})`;
 
+  // When the map fills on the hook, it is already coloured on frame 0: the first frame is what
+  // a viewer sees before deciding to swipe.
   const fill = cues.find((c) => c.kind === 'fill')!;
-  const fillProgress = interpolate(frame, [fill.start, fill.start + 45], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic) });
+  const fillProgress = fill.start === 0 ? 1 : interpolate(frame, [fill.start, fill.start + 45], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic) });
 
   // Countries over the threshold stay blue until the reveal, so the answer isn't on screen
   // from the first seconds; then they turn amber one by one, biggest value last.
@@ -101,15 +132,18 @@ export const WorldMap: React.FC<{
   const amberAt = (iso: string) => revealStart + Math.max(0, over.indexOf(iso)) * 4;
 
   const active = [...cues].reverse().find((c) => c.start <= frame && (c.kind === 'highlight' || c.kind === 'reveal' || c.kind === 'zoom'));
-  const activeIso = active?.iso;
+  // A fill cue after a zoom returns to the world view, so nothing stays outlined.
+  const lastCue = [...cues].reverse().find((c) => c.start <= frame);
+  const activeIso = lastCue && lastCue.kind !== 'fill' ? active?.iso : undefined;
   const pulse = active ? spring({ frame: frame - active.start, fps, config: { damping: 12 } }) : 0;
 
   const activeFeature = activeIso ? FEATURES.find((f) => f.iso3 === activeIso) : undefined;
-  const label = activeIso ? labelFor(activeIso) : undefined;
+  // At the reveal, the answer's big number replaces the small label.
+  const label = activeIso && lastCue?.kind !== 'reveal' ? labelFor(activeIso) : undefined;
   let labelPos: [number, number] | null = null;
   if (activeFeature) {
-    const p = projection(geoCentroid(activeFeature as any));
-    if (p) labelPos = [(p[0] - cam.cx) * cam.k + W / 2, (p[1] - cam.cy) * cam.k + MAP_TOP + MAP_H / 2];
+    const p = projection(geoCentroid(mainland(activeFeature) as any));
+    if (p) labelPos = [(p[0] - cam.cx) * cam.k + W / 2, (p[1] - cam.cy) * cam.k + MAP.centreY];
   }
 
   const ringed = [...over.filter((iso) => frame >= amberAt(iso)), ...(activeIso && !over.includes(activeIso) ? [activeIso] : [])];
@@ -126,11 +160,21 @@ export const WorldMap: React.FC<{
     <>
       <svg width={W} height={1920} style={{ position: 'absolute', inset: 0 }}>
         <defs>
-          <clipPath id="mapclip"><rect x={0} y={ZONE.visualTop} width={W} height={ZONE.visualBottom - ZONE.visualTop} /></clipPath>
-          <filter id="glow"><feGaussianBlur stdDeviation={6} result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+          {/* A soft shadow under the land, so the map reads as an object rather than flat shapes. */}
+          <filter id="lift" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx={0} dy={6 / cam.k} stdDeviation={5 / cam.k} floodColor="#000" floodOpacity={0.5} />
+          </filter>
+          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={7 / cam.k} result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+          {/* Dark bands behind the headline and the captions, so text stays readable over the map. */}
+          <linearGradient id="topshade" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={C.bgDeep} stopOpacity={0.96} /><stop offset="0.7" stopColor={C.bgDeep} stopOpacity={0.82} /><stop offset="1" stopColor={C.bgDeep} stopOpacity={0} />
+          </linearGradient>
+          <linearGradient id="bottomshade" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={C.bgDeep} stopOpacity={0} /><stop offset="0.35" stopColor={C.bgDeep} stopOpacity={0.7} /><stop offset="1" stopColor={C.bgDeep} stopOpacity={0.95} />
+          </linearGradient>
         </defs>
-        <g clipPath="url(#mapclip)">
-          <g transform={transform}>
+        <g transform={transform}>
+          <g filter="url(#lift)">
             {FEATURES.map((f) => {
               const d = path(f as any);
               if (!d) return null;
@@ -142,21 +186,22 @@ export const WorldMap: React.FC<{
               const isAnswer = has && (threshold !== undefined
                 ? map[iso] > threshold && frame >= amberAt(iso)
                 : iso === answerIso && frame >= revealStart);
-              const color = shown ? (isAnswer ? C.amber : early.get(iso)!) : C.land;
-              const isActive = iso === activeIso;
-              return (
-                <path key={f.id} d={d} fill={color} stroke={isActive ? C.pale : C.border}
-                  strokeWidth={(isActive ? 3 + pulse * 2 : 0.6) / cam.k} filter={isActive ? 'url(#glow)' : undefined} />
-              );
-            })}
-            {/* Small countries get a ring, or they'd be invisible on a phone. */}
-            {markers.map(({ iso, x, y, at }) => {
-              const pop = spring({ frame: frame - at, fps, config: { damping: 12 } });
-              return <circle key={iso} cx={x} cy={y} r={(22 + 6 * (1 - pop)) / cam.k} fill="none" stroke={C.amber}
-                strokeWidth={4 / cam.k} opacity={pop} />;
+              const color = shown ? (isAnswer ? C.amber : colors.get(iso)!) : C.land;
+              return <path key={f.id} d={d} fill={color} stroke={C.bgDeep} strokeWidth={0.7 / cam.k} />;
             })}
           </g>
+          {activeFeature && (
+            <path d={path(activeFeature as any) ?? ''} fill="none" stroke="#ffffff" strokeWidth={(3 + pulse * 2) / cam.k} filter="url(#glow)" />
+          )}
+          {/* Small countries get a ring, or they'd be invisible on a phone. */}
+          {markers.map(({ iso, x, y, at }) => {
+            const pop = spring({ frame: frame - at, fps, config: { damping: 12 } });
+            return <circle key={iso} cx={x} cy={y} r={(22 + 6 * (1 - pop)) / cam.k} fill="none" stroke={C.amber}
+              strokeWidth={4 / cam.k} opacity={pop} />;
+          })}
         </g>
+        <rect x={0} y={0} width={W} height={700} fill="url(#topshade)" />
+        <rect x={0} y={1360} width={W} height={560} fill="url(#bottomshade)" />
       </svg>
       {/* Blue key from the fill until the amber key replaces it. */}
       {fillProgress > 0 && !(over.length > 0 && thresholdLabel && frame >= revealStart) && (
@@ -165,7 +210,7 @@ export const WorldMap: React.FC<{
             fontFamily: FONT, color: C.pale, fontSize: 28, fontWeight: 700 }}>
             <span>Less</span>
             <span style={{ width: 150, height: 20, borderRadius: 6, display: 'inline-block',
-              background: `linear-gradient(90deg, ${C.ramp[0]}, ${C.ramp[1]}, ${C.ramp[2]})` }} />
+              background: `linear-gradient(90deg, ${C.blues[0]}, ${C.blues[2]}, ${C.blues[5]})` }} />
             <span>More</span>
             {unit && <span style={{ opacity: 0.7, fontWeight: 500 }}>{unit}</span>}
           </div>
@@ -186,14 +231,47 @@ export const WorldMap: React.FC<{
       })()}
       {label && (
         <div style={{ position: 'absolute', left: labelPos ? Math.min(W - 380, Math.max(380, labelPos[0])) : W / 2,
-          top: labelPos ? Math.min(ZONE.visualBottom - 150, Math.max(ZONE.visualTop + 10, labelPos[1] - 140)) : ZONE.visualTop + 20,
+          top: labelPos ? Math.min(ZONE.visualBottom - 150, Math.max(ZONE.visualTop + 60, labelPos[1] - 150)) : ZONE.visualTop + 60,
           transform: `translateX(-50%) scale(${0.85 + pulse * 0.15})`, whiteSpace: 'nowrap' }}>
-          <div style={{ background: 'rgba(10,29,43,0.88)', border: `2px solid ${C.amber}`, borderRadius: 18, padding: '14px 26px',
-            fontFamily: FONT, color: C.pale, fontSize: 36, fontWeight: 800, textAlign: 'center', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
+          <div style={{ background: 'rgba(10,29,43,0.88)', border: `2px solid ${C.pale}`, borderRadius: 18, padding: '14px 26px',
+            fontFamily: FONT, color: C.pale, fontSize: 40, fontWeight: 800, textAlign: 'center', boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }}>
             {label}
           </div>
         </div>
       )}
     </>
+  );
+};
+
+// "$64,000" at 0.5 -> "$32,000": counts the first number in a display string up from zero,
+// keeping its decimals, thousands separators, prefix and suffix.
+export function countUp(display: string, progress: number): string {
+  const m = display.match(/\d[\d,]*(\.\d+)?/);
+  if (!m) return display;
+  const value = Number(m[0].replace(/,/g, ''));
+  const decimals = m[1] ? m[1].length - 1 : 0;
+  const shown = (value * progress).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals, useGrouping: m[0].includes(',') });
+  return display.slice(0, m.index) + shown + display.slice((m.index ?? 0) + m[0].length);
+}
+
+// The payoff is the biggest thing on screen: the answer's value counts up in large amber digits
+// above the answer country, which the camera has zoomed in on.
+export const AnswerNumber: React.FC<{ display: string; unit?: string; start: number; end?: number }> = ({ display, unit, start, end }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  if (frame < start) return null;
+  const out = end === undefined ? 1 : interpolate(frame, [end, end + 10], [1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+  if (out <= 0) return null;
+  const pop = spring({ frame: frame - start - 6, fps, config: { damping: 11, stiffness: 170 } });
+  const count = interpolate(frame, [start + 6, start + 30], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.out(Easing.cubic) });
+  const text = countUp(display, count);
+  const size = display.length > 9 ? 150 : display.length > 6 ? 190 : 230;
+  return (
+    <div style={{ position: 'absolute', left: 0, right: 0, top: ZONE.visualTop + 20, textAlign: 'center', fontFamily: FONT,
+      transform: `scale(${0.6 + 0.4 * pop})`, opacity: Math.min(1, pop * 1.5) * out }}>
+      <div style={{ fontSize: size, fontWeight: 900, letterSpacing: -6, lineHeight: 1, color: C.amber, fontVariantNumeric: 'tabular-nums',
+        textShadow: '0 10px 40px rgba(0,0,0,0.75)' }}>{text}</div>
+      {unit && <div style={{ fontSize: 40, fontWeight: 800, color: C.pale, marginTop: 6, textShadow: '0 4px 18px rgba(0,0,0,0.7)' }}>{unit}</div>}
+    </div>
   );
 };
