@@ -3,6 +3,7 @@ import { AbsoluteFill, continueRender, delayRender } from 'remotion';
 import '@fontsource/inter/500.css';
 import '@fontsource/inter/700.css';
 import '@fontsource/inter/800.css';
+import '@fontsource/inter/900.css';
 import { Background, Captions, Headline, Kicker, SourceLine, sourceFrom } from './components/Chrome';
 import { MapReveal } from './formats/MapReveal';
 import { Countdown } from './formats/Countdown';

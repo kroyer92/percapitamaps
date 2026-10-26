@@ -1,6 +1,7 @@
 // The parts every format shares: background, kicker, headline, captions and source line.
-import React from 'react';
+import React, { useMemo } from 'react';
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
+import { createTikTokStyleCaptions } from '@remotion/captions';
 import { C, FONT, SAFE, W, ZONE } from '../theme';
 import type { ShortProps, TimedBeat } from '../types';
 
@@ -25,7 +26,7 @@ export const Background: React.FC = () => (
 
 export const Kicker: React.FC<{ text: string }> = ({ text }) => (
   <div style={{ position: 'absolute', top: ZONE.kicker, left: SAFE.left, right: W - SAFE.right, textAlign: 'center',
-    fontFamily: FONT, fontWeight: 700, fontSize: 30, letterSpacing: 4, color: C.amber, textTransform: 'uppercase' }}>
+    fontFamily: FONT, fontWeight: 800, fontSize: 30, letterSpacing: 4, color: C.blue, textTransform: 'uppercase' }}>
     {text}
   </div>
 );
@@ -33,39 +34,66 @@ export const Kicker: React.FC<{ text: string }> = ({ text }) => (
 export const Headline: React.FC<{ beats: TimedBeat[] }> = ({ beats }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const { beat } = currentBeat(beats, frame);
+  const { beat, index } = currentBeat(beats, frame);
   const local = frame - beat.start;
-  const s = spring({ frame: local, fps, config: { damping: 200 }, durationInFrames: 10 });
   const text = beat.on_screen || '';
+  // The hook is the first thing a viewer sees, before deciding to swipe: big, heavy and fully
+  // visible on frame 0, settling from slightly larger instead of fading in.
+  if (index === 0) {
+    const s = spring({ frame: local, fps, config: { damping: 16, stiffness: 260 } });
+    const size = text.length > 40 ? 78 : text.length > 26 ? 88 : 100;
+    return (
+      <div style={{ position: 'absolute', top: ZONE.headline - 10, left: 40, right: 40, height: 250,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
+        <div style={{ fontFamily: FONT, fontWeight: 900, fontSize: size, lineHeight: 1.02, color: C.pale, letterSpacing: -2,
+          transform: `scale(${1.1 - 0.1 * s})`, textWrap: 'balance' as any, textShadow: '0 6px 30px rgba(0,0,0,0.6)' }}>
+          {text}
+        </div>
+      </div>
+    );
+  }
+  const s = spring({ frame: local, fps, config: { damping: 200 }, durationInFrames: 10 });
   const size = text.length > 34 ? 64 : text.length > 22 ? 74 : 86;
   return (
     <div style={{ position: 'absolute', top: ZONE.headline, left: SAFE.left, right: W - SAFE.right, height: 220,
       display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
       <div style={{ fontFamily: FONT, fontWeight: 800, fontSize: size, lineHeight: 1.08, color: C.pale,
-        letterSpacing: -1, opacity: frame < 2 ? 1 : s, transform: `translateY(${(1 - s) * 18}px)`, textWrap: 'balance' as any }}>
+        letterSpacing: -1, opacity: s, transform: `translateY(${(1 - s) * 18}px)`, textWrap: 'balance' as any, textShadow: '0 6px 30px rgba(0,0,0,0.6)' }}>
         {text}
       </div>
     </div>
   );
 };
 
-// Word-by-word captions of the voiceover, a few words at a time, current word in amber.
+// Punchy captions of the voiceover: one to three words at a time, large, each group popping in.
+// The word being spoken is blue; amber stays reserved for the answer.
 export const Captions: React.FC<{ beats: TimedBeat[] }> = ({ beats }) => {
   const frame = useCurrentFrame();
-  const { beat } = currentBeat(beats, frame);
-  const words = beat.words;
-  if (!words.length || frame < words[0].start - 2) return null;
-  let cur = words.findIndex((w) => frame >= w.start && frame < w.end);
-  if (cur < 0) cur = frame >= words[words.length - 1].end ? words.length - 1 : 0;
-  const chunkStart = Math.floor(cur / 4) * 4;
-  const chunk = words.slice(chunkStart, chunkStart + 4);
+  const { fps } = useVideoConfig();
+  const pages = useMemo(() => createTikTokStyleCaptions({
+    captions: beats.flatMap((b) => b.words.map((w, i) => ({
+      text: i === 0 ? w.text : ` ${w.text}`,
+      startMs: (w.start / fps) * 1000,
+      endMs: (w.end / fps) * 1000,
+      timestampMs: null,
+      confidence: null,
+    }))),
+    combineTokensWithinMilliseconds: 650,
+  }).pages, [beats, fps]);
+  const ms = (frame / fps) * 1000;
+  const page = pages.find((p) => ms >= p.startMs && ms < p.startMs + p.durationMs);
+  if (!page) return null;
+  const pop = spring({ frame: frame - Math.round((page.startMs / 1000) * fps), fps, config: { damping: 14, stiffness: 240 } });
+  const size = page.text.trim().length > 18 ? 70 : 84;
   return (
-    <div style={{ position: 'absolute', top: ZONE.captions, left: SAFE.left, right: W - SAFE.right, height: 120,
-      display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: '0 18px' }}>
-      {chunk.map((w, i) => (
-        <span key={i} style={{ fontFamily: FONT, fontWeight: 800, fontSize: 58, color: chunkStart + i === cur ? C.amber : C.pale,
-          textShadow: '0 4px 18px rgba(0,0,0,0.55)' }}>
-          {w.text}
+    <div style={{ position: 'absolute', top: ZONE.captions, left: SAFE.left, right: W - SAFE.right, height: 130,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: '0 20px',
+      transform: `scale(${0.75 + 0.25 * pop})` }}>
+      {page.tokens.map((t, i) => (
+        <span key={i} style={{ fontFamily: FONT, fontWeight: 900, fontSize: size, letterSpacing: -1,
+          color: ms >= t.fromMs && ms < t.toMs ? C.blue : C.pale,
+          textShadow: '0 5px 0 rgba(0,0,0,0.55), 0 0 28px rgba(0,0,0,0.6)' }}>
+          {t.text.trim()}
         </span>
       ))}
     </div>

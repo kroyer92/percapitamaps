@@ -11,6 +11,7 @@ import type { Beat } from './validate.js';
 import { synthesize, type VoiceClip } from './voice.js';
 import { place, timedBeats, FPS } from './timeline.js';
 import { buildVoiceTrack, finalMix, pickMusic, type MusicPick } from './audio.js';
+import { buildSfxTrack } from './sfx.js';
 import type { ShortProps } from '../remotion/types.js';
 
 let bundlePromise: Promise<string> | undefined;
@@ -119,10 +120,11 @@ export async function renderShort(opts: {
     onProgress: ({ progress }) => opts.onProgress?.(progress),
   });
 
-  opts.onStep?.('Mixing voice and music');
+  opts.onStep?.('Mixing voice, music and sound effects');
   const music = await pickMusic(opts.seed);
+  const sfx = await buildSfxTrack(props, seconds, workDir);
   await fs.mkdir(path.dirname(outFile), { recursive: true });
-  await finalMix(silent, voiceTrack, music, seconds, outFile);
+  await finalMix(silent, voiceTrack, music, seconds, outFile, sfx);
   await fs.rm(silent, { force: true });
   return { video: outFile, seconds, props, music, clips };
 }

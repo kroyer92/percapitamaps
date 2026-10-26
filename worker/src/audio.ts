@@ -5,9 +5,9 @@ import { config } from './config.js';
 import { run } from './lib/proc.js';
 import type { Placed } from './timeline.js';
 
-interface Pcm { rate: number; data: Int16Array }
+export interface Pcm { rate: number; data: Int16Array }
 
-async function readWav(file: string): Promise<Pcm> {
+export async function readWav(file: string): Promise<Pcm> {
   const buf = await fs.readFile(file);
   let off = 12;
   let rate = 24000;
@@ -30,7 +30,7 @@ async function readWav(file: string): Promise<Pcm> {
   throw new Error(`No data chunk in ${file}`);
 }
 
-async function writeWav(file: string, pcm: Pcm): Promise<void> {
+export async function writeWav(file: string, pcm: Pcm): Promise<void> {
   const header = Buffer.alloc(44);
   header.write('RIFF', 0);
   header.writeUInt32LE(36 + pcm.data.length * 2, 4);
@@ -76,19 +76,24 @@ export async function pickMusic(seed: number): Promise<MusicPick | undefined> {
   }
 }
 
-// Mix voice and music, normalise to -14 LUFS (two-pass loudnorm), and mux onto the silent video.
-export async function finalMix(video: string, voice: string, music: MusicPick | undefined, seconds: number, out: string): Promise<void> {
+// Mix voice, music and sound effects, normalise to -14 LUFS (two-pass loudnorm), and mux onto the silent video.
+export async function finalMix(video: string, voice: string, music: MusicPick | undefined, seconds: number, out: string, sfx?: string): Promise<void> {
   const dir = path.dirname(out);
   const mix = path.join(dir, `${path.basename(out, path.extname(out))}.mix.wav`);
   const inputs = ['-y', '-i', voice];
+  const parts = ['[vo]'];
   let filter = '[0:a]aresample=48000,aformat=channel_layouts=stereo,apad[vo]';
   if (music) {
     inputs.push('-stream_loop', '-1', '-i', music.file);
     filter += `;[1:a]aresample=48000,aformat=channel_layouts=stereo,loudnorm=I=-33:TP=-8:LRA=11,afade=t=in:d=0.6,afade=t=out:st=${Math.max(0, seconds - 1.2)}:d=1.2[m]`;
-    filter += ';[vo][m]amix=inputs=2:duration=longest:normalize=0[a]';
-  } else {
-    filter += ';[vo]anull[a]';
+    parts.push('[m]');
   }
+  if (sfx) {
+    inputs.push('-i', sfx);
+    filter += `;[${music ? 2 : 1}:a]aresample=48000,aformat=channel_layouts=stereo[fx]`;
+    parts.push('[fx]');
+  }
+  filter += parts.length > 1 ? `;${parts.join('')}amix=inputs=${parts.length}:duration=first:normalize=0[a]` : ';[vo]anull[a]';
   await run('ffmpeg', [...inputs, '-filter_complex', filter, '-map', '[a]', '-t', seconds.toFixed(3), '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', mix]);
 
   const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', mix, '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json', '-f', 'null', '-']);
