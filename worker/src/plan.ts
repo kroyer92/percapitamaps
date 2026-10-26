@@ -12,6 +12,7 @@ export interface Slot {
   country?: string; // must appear in the line
   numbers: string[]; // the only numbers the line may use (it must use the first one, if any)
   fallback: string; // used when the model's line breaks a rule
+  alts?: string[]; // other plain lines that say the same thing; the one used least lately wins
   visual: string;
   on_screen: string;
 }
@@ -21,12 +22,15 @@ const THE = /^(United |Netherlands|Philippines|Czech|Central African|Dominican|D
 const the = (name: string) => (THE.test(name) ? `the ${name}` : name);
 const The = (name: string) => (THE.test(name) ? `The ${name}` : name);
 
-// One angle per contender, so the build-up lines don't all share one sentence pattern.
+// One angle per contender, so the build-up lines don't all share one sentence pattern. Each video
+// starts at a different angle (see ctx.seed), so the #5 line isn't worded the same way every day.
 const ANGLES = [
-  'Open with the country name and say it already dwarfs the guess from slot 2, without repeating that number.',
+  'Open with the country name and say it is far above the guess, without repeating the guess number.',
   'Open with the number, then say which country it is.',
   'Say what makes this country a surprising place to rank this high, without inventing numbers.',
   'Say it is close to the top but still not number one.',
+  'Ask a short question, then answer it with the country and number.',
+  'Start with a short transition word, then the country and the number.',
 ];
 
 // One slot per country group in the "world of 100" picture. Countries with the same count share
@@ -79,7 +83,11 @@ const CONTENDER_LINES: ((name: string, rank: number, value: string) => string)[]
   (n, r, v) => `Number ${r} is ${the(n)}: ${v}.`,
   (n, r, v) => `Then comes ${the(n)}, at ${v}, in number ${r}.`,
   (n, r, v) => `${The(n)} has ${v}. That is number ${r}.`,
+  (n, r, v) => `At number ${r} sits ${the(n)}, with ${v}.`,
+  (n, r, v) => `Next up, ${the(n)}: ${v}, good for number ${r}.`,
 ];
+const contenderLines = (name: string, rank: number, value: string, start: number) =>
+  CONTENDER_LINES.map((_, k) => CONTENDER_LINES[(start + k) % CONTENDER_LINES.length](name, rank, value));
 
 const withUnit = (display: string, unit: string) => (/^[\d.,]+$/.test(display) ? `${display} ${unit}` : display);
 
@@ -88,7 +96,7 @@ const withUnit = (display: string, unit: string) => (/^[\d.,]+$/.test(display) ?
 const BIG_GUESSES = ['USA', 'IND', 'CHN', 'BRA', 'RUS', 'GBR', 'DEU', 'JPN'];
 const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 
-interface Ctx { question: string; f: Facts; u: string; top: RankRow }
+interface Ctx { question: string; f: Facts; u: string; top: RankRow; seed: number }
 
 const hookSlot = ({ question }: Ctx, visual: string): Slot => ({
   role: 'hook',
@@ -101,7 +109,7 @@ const hookSlot = ({ question }: Ctx, visual: string): Slot => ({
 
 function guessSlot({ f, u, question }: Ctx, minRank: number, visual: (iso: string) => string): Slot | undefined {
   const byIso = new Map(f.ranking.map((r) => [r.iso3, r]));
-  const options = BIG_GUESSES.map((iso) => byIso.get(iso)).filter((r): r is RankRow => !!r && r.rank > minRank);
+  const options = BIG_GUESSES.map((iso) => byIso.get(iso)).filter((r): r is RankRow => !!r && r.rank > minRank && r.iso3 !== f.ranking.at(-1)?.iso3); // the closer names the last one
   const guess = options.at(hash(f.dataset_id ?? question) % Math.max(1, options.length));
   if (!guess) return undefined;
   return {
@@ -110,6 +118,12 @@ function guessSlot({ f, u, question }: Ctx, minRank: number, visual: (iso: strin
     country: guess.name,
     numbers: [guess.display, String(guess.rank)],
     fallback: `You might guess ${the(guess.name)}, but it has only ${withUnit(guess.display, u)}.`,
+    alts: [
+      `Most people would say ${the(guess.name)}. It has just ${withUnit(guess.display, u)}.`,
+      `${The(guess.name)} seems the obvious pick, yet it only has ${withUnit(guess.display, u)}.`,
+      `Not ${the(guess.name)}: it sits at number ${guess.rank}, with ${withUnit(guess.display, u)}.`,
+      `Guess ${the(guess.name)}? It only reaches ${withUnit(guess.display, u)}, number ${guess.rank}.`,
+    ],
     visual: visual(guess.iso3),
     on_screen: `${guess.name}: ${guess.display}`,
   };
@@ -120,18 +134,23 @@ const medianSlot = ({ f, u }: Ctx, visual: string): Slot => ({
   brief: `Context: the typical country (the world median) has just ${withUnit(f.world_median, u)}.`,
   numbers: [f.world_median],
   fallback: `The typical country has just ${withUnit(f.world_median, u)}.`,
+  alts: [
+    `For comparison, the world median is ${withUnit(f.world_median, u)}.`,
+    `Half of all countries have less than ${withUnit(f.world_median, u)}.`,
+    `A country in the middle of the pack has ${withUnit(f.world_median, u)}.`,
+  ],
   visual,
   on_screen: `World median: ${f.world_median}`,
 });
 
 // #5, #4, #3, #2 (or a shorter run), each with its own angle.
-const contenderSlots = ({ f, u }: Ctx, from: number, visual: (iso: string) => string): Slot[] =>
+const contenderSlots = ({ f, u, seed }: Ctx, from: number, visual: (iso: string) => string): Slot[] =>
   f.ranking.slice(1, from).reverse().map((c, i) => ({
     role: 'contender',
-    brief: `${the(c.name)} is number ${c.rank} with ${withUnit(c.display, u)}. ${ANGLES.at(i % ANGLES.length)}`,
+    brief: `${the(c.name)} is number ${c.rank} with ${withUnit(c.display, u)}. ${ANGLES[(seed + i) % ANGLES.length]}`,
     country: c.name,
     numbers: [c.display, String(c.rank)],
-    fallback: CONTENDER_LINES[i % CONTENDER_LINES.length](c.name, c.rank, withUnit(c.display, u)),
+    ...(([first, ...rest]) => ({ fallback: first, alts: rest }))(contenderLines(c.name, c.rank, withUnit(c.display, u), seed + i)),
     visual: visual(c.iso3),
     on_screen: `#${c.rank} ${c.name}`,
   }));
@@ -142,6 +161,11 @@ const revealSlot = ({ f, u, top }: Ctx, lead = 'number one is'): Slot => ({
   country: top.name,
   numbers: [top.display, ...(f.top_vs_median ? [f.top_vs_median] : [])],
   fallback: `${lead.charAt(0).toUpperCase()}${lead.slice(1)} ${the(top.name)}, with ${withUnit(top.display, u)}.`,
+  alts: lead === 'number one is' ? [
+    `The top spot goes to ${the(top.name)}, with ${withUnit(top.display, u)}.`,
+    `${The(top.name)} leads the world, with ${withUnit(top.display, u)}.`,
+    `And number one: ${the(top.name)}, at ${withUnit(top.display, u)}.`,
+  ] : undefined,
   visual: 'reveal_answer',
   on_screen: `#1 ${top.name}: ${top.display}`,
 });
@@ -153,6 +177,10 @@ function closerSlot({ f, top }: Ctx, visual: string): Slot | undefined {
       brief: `A closing line: only ${f.threshold.count} countries have ${f.threshold.label}. End on that surprise, so the video can loop back to the question.`,
       numbers: [f.threshold.count],
       fallback: `Only ${f.threshold.count} countries have ${f.threshold.label}.`,
+      alts: [
+        `In the whole world, only ${f.threshold.count} countries have ${f.threshold.label}.`,
+        `Just ${f.threshold.count} countries on Earth have ${f.threshold.label}.`,
+      ],
       visual,
       on_screen: `${f.threshold.count} countries`,
     };
@@ -167,6 +195,11 @@ function closerSlot({ f, top }: Ctx, visual: string): Slot | undefined {
       country: last.name,
       numbers: [last.display],
       fallback: `At the other end, ${the(last.name)} has just ${withUnit(last.display, f.unit)}.`,
+      alts: [
+        `Compare that with ${the(last.name)}: just ${withUnit(last.display, f.unit)}.`,
+        `${The(last.name)}, in last place, has ${withUnit(last.display, f.unit)}.`,
+        `At the bottom of the list sits ${the(last.name)}, at ${withUnit(last.display, f.unit)}.`,
+      ],
       visual,
       on_screen: `Last: ${last.name} ${last.display}`,
     };
@@ -182,13 +215,13 @@ const valueOf = (s: string) => s.split(': ').slice(1).join(': ');
 export function planFor(format: Format, question: string, f: Facts): Slot[] | undefined {
   const top = f.ranking[0];
   if (!top) return undefined;
-  const c: Ctx = { question, f, u: f.unit, top };
+  const c: Ctx = { question, f, u: f.unit, top, seed: hash(`${f.dataset_id ?? ''}|${question}`) };
   const keep = (xs: (Slot | undefined)[]) => xs.filter((x): x is Slot => !!x);
 
   if (format === 'MAP_REVEAL') {
     return keep([
       hookSlot(c, 'map_fill'),
-      guessSlot(c, 3, (iso) => `zoom_to:${iso}`),
+      guessSlot(c, 5, (iso) => `zoom_to:${iso}`), // never a country the build-up names again
       medianSlot(c, 'map_fill'),
       ...contenderSlots(c, 5, (iso) => `highlight:${iso}`),
       revealSlot(c),
@@ -241,7 +274,7 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
       },
       ...now.slice(1).reverse().map((r, i): Slot => ({
         role: 'contender',
-        brief: `Today ${the(r.name)} is number ${r.rank} with ${withUnit(r.display, c.u)}. ${ANGLES.at((i + 1) % ANGLES.length)}`,
+        brief: `Today ${the(r.name)} is number ${r.rank} with ${withUnit(r.display, c.u)}. ${ANGLES[(c.seed + i + 1) % ANGLES.length]}`,
         country: r.name,
         numbers: [r.display, String(r.rank)],
         fallback: `Today ${the(r.name)} ranks number ${r.rank}, with ${withUnit(r.display, c.u)}.`,
@@ -338,12 +371,12 @@ export function lineProblem(line: unknown, s: Slot, topName: string): string | u
   return undefined;
 }
 
-export function slotsUser(slots: Slot[], fixHint?: string): string {
+export function slotsUser(slots: Slot[], fixHint?: string, avoid: string[] = []): string {
   return `TASK: write the voiceover, one spoken line per slot. The story is already planned; you only write the lines.
 Each line: one natural spoken sentence, 7 to 12 words (the hook max 9), that does exactly what its slot says.
 Use only the numbers given in the slot, written exactly as given. Always name the slot's country.
 Start every line differently: never reuse a sentence pattern such as "X has N, but...", and never repeat a phrase (like "in this tiny world") across lines.
-${fixHint ? `FIX THIS FROM THE LAST ATTEMPT: ${fixHint}\n` : ''}SLOTS:
+${avoid.length ? `Recent videos already used these phrases, so do not use them: ${avoid.map((p) => `"${p}"`).join(', ')}.\n` : ''}${fixHint ? `FIX THIS FROM THE LAST ATTEMPT: ${fixHint}\n` : ''}SLOTS:
 ${slots.map((s, i) => `${i + 1}. ${s.brief}`).join('\n')}
 Return JSON only: {"lines":["line for slot 1","line for slot 2", ...]} with exactly ${slots.length} lines.`;
 }
@@ -362,9 +395,48 @@ function plannedPhrases(slots: Slot[]): Set<string> {
 }
 const remember = (line: string, seen: Map<string, number>) => phrases(line).forEach((p) => seen.set(p, (seen.get(p) ?? 0) + 1));
 
-export async function writePlanned(system: string, slots: Slot[], topName: string, fixHint?: string, onStep: (s: string) => void = () => {}): Promise<Script> {
+// Across videos: a three-word phrase that two of the recent videos already said is stale ("number
+// one is", "has just", "dwarfs the"). Phrases of only small words ("one of the") or with a country
+// name in them ("the united states") don't count: the plan picks the countries, not the wording.
+const SMALL = new Set(['the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'is', 'it', 'and', 'or', 'but', 'that', 'this', 'with', 'for', 'one', 'by', 'as', 'are', 'its', "it's", 'has', 'have', 'than', 'more', 'most', 'just', 'only', 'per']);
+export function stalePhrases(recent: string[][], slots: Slot[], countryNames: string[] = []): Set<string> {
+  const nameWords = new Set(countryNames.flatMap((n) => n.toLowerCase().split(/[^a-z']+/)).filter((w) => w && !SMALL.has(w)));
+  const planned = plannedPhrases(slots);
+  const count = new Map<string, number>();
+  for (const video of recent) {
+    const once = new Set(video.flatMap((l) => [...phrases(l)]));
+    once.forEach((p) => count.set(p, (count.get(p) ?? 0) + 1));
+  }
+  return new Set([...count].filter(([p, n]) => n >= 2 && !planned.has(p) && p.split(' ').some((w) => !SMALL.has(w)) && !p.split(' ').some((w) => nameWords.has(w))).map(([p]) => p));
+}
+const staleIn = (line: string, stale: Set<string>) => [...phrases(line)].filter((p) => stale.has(p)).length;
+// A line's shape: country names become "xx" and numbers "nn", so "Number 4 is India: 2,100 hours."
+// and "Number 3 is Costa Rica: 2,149 hours." are seen as the same sentence.
+function shaper(countryNames: string[]) {
+  const names = [...countryNames].sort((a, b) => b.length - a.length).map((n) => n.toLowerCase());
+  return (line: string) => {
+    let t = ` ${line.toLowerCase()} `;
+    for (const n of names) if (t.includes(n)) t = t.split(n).join(' xx ');
+    return phrases(t.replace(/\d[\d,.]*/g, ' nn ').replace(/\bthe xx\b/g, 'xx'));
+  };
+}
+// The plain line for a slot: of its versions, the one whose shape this video and the last few
+// videos used least. Ties keep the order, which the plan already rotates per video.
+function plainLine(s: Slot, shape: (l: string) => Set<string>, usedHere: Set<string>, usedLately: Set<string>): string {
+  const options = [s.fallback, ...(s.alts ?? [])];
+  const score = (l: string) => [...shape(l)].reduce((n, p) => n + (usedHere.has(p) ? 3 : 0) + (usedLately.has(p) ? 1 : 0), 0);
+  return options.reduce((best, l) => (score(l) < score(best) ? l : best));
+}
+
+// recent: the spoken lines of the last few videos, one array per video.
+export async function writePlanned(system: string, slots: Slot[], topName: string, fixHint?: string, onStep: (s: string) => void = () => {}, recent: string[][] = [], countryNames: string[] = []): Promise<Script> {
   onStep(`Writing ${slots.length} planned lines`);
-  const out = await chatJson<{ lines?: unknown[] }>({ temperature: 0.7, system, user: slotsUser(slots, fixHint), numPredict: 900 }).catch(() => ({ lines: [] as unknown[] }));
+  const stale = stalePhrases(recent, slots, countryNames);
+  const shape = shaper(countryNames);
+  const usedLately = new Set(recent.slice(0, 3).flatMap((v) => v.flatMap((l) => [...shape(l)])));
+  const usedHere = new Set<string>();
+  const avoid = [...stale].slice(0, 25);
+  const out = await chatJson<{ lines?: unknown[] }>({ temperature: 0.8, system, user: slotsUser(slots, fixHint, avoid), numPredict: 900 }).catch(() => ({ lines: [] as unknown[] }));
   const lines = Array.isArray(out.lines) ? out.lines : [];
   const fixed: string[] = [];
   const seen = new Map<string, number>(); // three-word phrase -> lines that used it
@@ -372,10 +444,13 @@ export async function writePlanned(system: string, slots: Slot[], topName: strin
   const beats: Beat[] = slots.map((s, i) => {
     let problem = lineProblem(lines[i], s, topName);
     if (!problem && overused(String(lines[i]), seen, planned)) problem = 'repeats a phrase';
-    if (!problem) remember(String(lines[i]), seen);
+    if (!problem && staleIn(String(lines[i]), stale)) problem = 'same wording as recent videos';
+    const vo = problem ? (s.role === 'fixed' ? s.fallback : plainLine(s, shape, usedHere, usedLately)) : String(lines[i]).trim();
+    remember(vo, seen);
+    shape(vo).forEach((p) => usedHere.add(p));
     if (problem && s.role !== 'fixed') fixed.push(`${i + 1} (${problem})`);
     // filler: planned beats repeat a pattern on purpose, so the repeat check skips them.
-    return { vo: problem ? s.fallback : String(lines[i]).trim(), on_screen: s.on_screen, visual: s.visual, emphasis_words: s.country ? [s.country] : [], filler: true };
+    return { vo, on_screen: s.on_screen, visual: s.visual, emphasis_words: s.country ? [s.country] : [], filler: true };
   });
   if (fixed.length) onStep(`Used the plain line for slot ${fixed.join(', ')}`);
   return { beats };
