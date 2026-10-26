@@ -58,6 +58,28 @@ export async function storeSnapshot(body: any): Promise<void> {
       body,
     ],
   );
+  if (body.win === '72h') await studioReminder(Number(body.job_id));
+}
+
+// "Viewed vs swiped away" and the retention graph are only in Studio, so after the 72h snapshot
+// the bot asks for a look at the videos that need one: the first 10, and later any below the median.
+async function studioReminder(jobId: number): Promise<void> {
+  const rows = await q<{ job_id: number; views: number }>(
+    `SELECT m.job_id, m.views FROM metrics m JOIN jobs j ON j.id = m.job_id
+     WHERE m.win = '72h' AND j.published_at > now() - interval '28 days'`);
+  const me = rows.find((r) => r.job_id === jobId);
+  const job = (await q<{ youtube_video_id: string; title: string }>(`SELECT youtube_video_id, packaging->>'title' AS title FROM jobs WHERE id = $1`, [jobId]))[0];
+  if (!me || !job?.youtube_video_id) return;
+  const others = rows.filter((r) => r.job_id !== jobId).map((r) => r.views ?? 0);
+  const below = (me.views ?? 0) < median(others);
+  if (others.length >= 10 && !below) return;
+  await say([
+    `📊 <b>#${jobId} is 3 days old</b> · ${esc(job.title ?? '')} · ${(me.views ?? 0).toLocaleString('en-US')} views${below ? ' (below your median)' : ''}`,
+    `Open <a href="https://studio.youtube.com/video/${job.youtube_video_id}/analytics/tab-overview/period-default">its analytics in Studio</a> and screenshot:`,
+    '1. <b>Viewed vs. swiped away</b> (Engagement tab)',
+    '2. <b>The audience retention graph</b>',
+    'Send both to Claude in the project, so it can find where viewers leave.',
+  ].join('\n'));
 }
 
 function median(xs: number[]): number {
