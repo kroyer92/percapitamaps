@@ -6,9 +6,18 @@ import { lastJsonLine, run } from './lib/proc.js';
 // Spell out what the voice engine would otherwise misread.
 export function speakable(text: string): string {
   return text
+    // Big numbers are rounded for the ear only ("$131,338" -> "131 thousand dollars"); the screen and
+    // the captions keep the exact value. Read in full, each one took about 3 seconds.
+    .replace(/\b\d{1,3}(?:,\d{3})+\b(?!\.\d)/g, (m) => {
+      const n = Number(m.replace(/,/g, ''));
+      if (n >= 1e9) return `${+(n / 1e9).toFixed(1)} billion`;
+      if (n >= 1e6) return `${+(n / 1e6).toFixed(1)} million`;
+      if (n >= 1e4) return `${Math.round(n / 1e3)} thousand`;
+      return m;
+    })
     // "$2,760." -> "2,760 dollars." The number must not swallow the comma or full stop after it,
     // or the voice says "2,760. Dollars" and the next word gets glued on ("dollarsway").
-    .replace(/\$(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(\s+(?:trillion|billion|million))?/g, (_m, n, dec, big) => `${n}${dec ?? ''}${big ?? ''} dollars`)
+    .replace(/\$(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(\s+(?:trillion|billion|million|thousand))?/g, (_m, n, dec, big) => `${n}${dec ?? ''}${big ?? ''} dollars`)
     .replace(/(\d)\s*%/g, '$1 percent')
     .replace(/(\d)\s*°C/g, '$1 degrees')
     .replace(/CO₂/g, 'C O 2')

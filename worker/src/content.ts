@@ -145,7 +145,8 @@ export async function generateContent(opts: {
       for (const sl of slots) for (const n of sl.numbers) for (const x of numbersIn(n)) allowed.add(x);
       script = await writePlanned(system, slots, spoiler?.name ?? '', fixHint, onStep, opts.recentLines, facts.ranking.map((r) => r.name));
       // The plan sets the length, so only real problems (numbers, codes) stop a planned script.
-      const left = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, fillers)
+      // No fillers: padding a planned script added 3 extra rank lines and pushed job #16 to 63 s.
+      const left = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, [])
         .filter((e) => !isMinor(e) && !e.startsWith('Total spoken words'));
       if (left.length) throw new NeedsHuman('The planned script failed the code checks.', left);
     } else {
