@@ -13,6 +13,7 @@ function node(wf, name, type, typeVersion, position, parameters, extra = {}) {
   return { id: uid(`${wf}:${name}`), name, type, typeVersion, position, parameters, ...extra };
 }
 const schedule = (wf, name, cron, pos) => node(wf, name, 'n8n-nodes-base.scheduleTrigger', 1.2, pos, { rule: { interval: [{ field: 'cronExpression', expression: cron }] } });
+const code = (wf, name, pos, jsCode, mode) => node(wf, name, 'n8n-nodes-base.code', 2, pos, { ...(mode ? { mode } : {}), jsCode });
 const manual = (wf, pos) => node(wf, 'Run manually', 'n8n-nodes-base.manualTrigger', 1, pos, {});
 const post = (wf, name, url, pos, body, extra = {}) => node(wf, name, 'n8n-nodes-base.httpRequest', 4.2, pos, {
   method: 'POST', url,
@@ -141,33 +142,37 @@ wfs.push(workflow('wf5', 'WF5 Analyze', [
     url: "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $('Videos due').item.json.start_date }}&endDate={{ $('Videos due').item.json.end_date }}&dimensions=elapsedVideoTimeRatio&metrics=audienceWatchRatio,relativeRetentionPerformance&filters=video=={{ $('Videos due').item.json.video_id }}",
     authentication: 'predefinedCredentialType', nodeCredentialType: 'googleOAuth2Api', options: {},
   }, { onError: 'continueRegularOutput' }),
-  post('wf5', 'Save snapshot', `${W}/analytics/snapshot`, [1200, 80],
-    "={{ ({ job_id: $('Videos due').item.json.job_id, win: $('Videos due').item.json.win, stats: $('Views and likes').item.json, analytics: $('Retention').item.json, curve: $json }) }}"),
+  code('wf5', 'Bundle snapshot', [1200, 80],
+    "return { json: { job_id: $('Videos due').item.json.job_id, win: $('Videos due').item.json.win, stats: $('Views and likes').item.json, analytics: $('Retention').item.json, curve: $input.item.json } };",
+    'runOnceForEachItem'),
+  post('wf5', 'Save snapshot', `${W}/analytics/snapshot`, [1440, 80], '={{ JSON.stringify($json) }}'),
   schedule('wf5', 'Sunday 18:00 UTC', '0 18 * * 0', [0, 380]),
   post('wf5', 'Weekly report', `${W}/report/weekly`, [280, 380]),
   // Channel totals for the studio's YPP wall.
-  // The two Save bodies are objects, not JSON.stringify strings: n8n 2.x refused the string when an
-  // upstream node passed on a Google error ("JSON Body is not valid JSON"). An object skips that parse.
-  // Long-form minutes come split by content type; the API rejects filters=creatorContentType==VIDEO_ON_DEMAND.
+  // creatorContentType is a dimension only; the API rejects it as a filter, so both reports are split
+  // by type and the worker keeps the rows it needs.
+  // The Save bodies are built in Code nodes: when a Google call fails, its error item breaks any
+  // expression that reads it in n8n 2.x (the JSON body comes out empty). A Code node gets plain data.
   node('wf5', 'Channel', 'n8n-nodes-base.httpRequest', 4.2, [240, -140], {
     url: 'https://www.googleapis.com/youtube/v3/channels?part=statistics&mine=true',
     authentication: 'predefinedCredentialType', nodeCredentialType: 'youTubeOAuth2Api', options: {},
   }, { ...retry, onError: 'continueRegularOutput' }),
   node('wf5', 'Shorts views by day', 'n8n-nodes-base.httpRequest', 4.2, [480, -140], {
-    url: "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 90 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&dimensions=day&metrics=views&filters=creatorContentType==SHORTS&sort=day",
+    url: "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 90 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&dimensions=day,creatorContentType&metrics=views&sort=day",
     authentication: 'predefinedCredentialType', nodeCredentialType: 'googleOAuth2Api', options: {},
   }, { onError: 'continueRegularOutput' }),
   node('wf5', 'Long-form watch time', 'n8n-nodes-base.httpRequest', 4.2, [720, -140], {
     url: "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 365 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&dimensions=creatorContentType&metrics=estimatedMinutesWatched",
     authentication: 'predefinedCredentialType', nodeCredentialType: 'googleOAuth2Api', options: {},
   }, { onError: 'continueRegularOutput' }),
-  post('wf5', 'Save channel totals', `${W}/analytics/channel`, [960, -140],
-    "={{ ({ channel: $('Channel').item.json, shorts: $('Shorts views by day').item.json, longform: $json }) }}"),
+  code('wf5', 'Bundle channel totals', [960, -140],
+    "return [{ json: { channel: $('Channel').first().json, shorts: $('Shorts views by day').first().json, longform: $input.first().json } }];"),
+  post('wf5', 'Save channel totals', `${W}/analytics/channel`, [1200, -140], '={{ JSON.stringify($json) }}'),
 ], [
   link('Every 6 hours', 'Channel'), link('Run manually', 'Channel'), link('Channel', 'Shorts views by day'),
-  link('Shorts views by day', 'Long-form watch time'), link('Long-form watch time', 'Save channel totals'),
+  link('Shorts views by day', 'Long-form watch time'), link('Long-form watch time', 'Bundle channel totals'), link('Bundle channel totals', 'Save channel totals'),
   link('Every 6 hours', 'Videos due'), link('Run manually', 'Videos due'), link('Videos due', 'Views and likes'),
-  link('Views and likes', 'Retention'), link('Retention', 'Retention curve'), link('Retention curve', 'Save snapshot'), link('Sunday 18:00 UTC', 'Weekly report'),
+  link('Views and likes', 'Retention'), link('Retention', 'Retention curve'), link('Retention curve', 'Bundle snapshot'), link('Bundle snapshot', 'Save snapshot'), link('Sunday 18:00 UTC', 'Weekly report'),
 ], errorWf));
 
 fs.mkdirSync(new URL('./workflows/', import.meta.url), { recursive: true });

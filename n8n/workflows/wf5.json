@@ -106,12 +106,26 @@
       "onError": "continueRegularOutput"
     },
     {
+      "id": "2d33a7e8-6939-73a2-4f20-326f53fef85c",
+      "name": "Bundle snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        80
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return { json: { job_id: $('Videos due').item.json.job_id, win: $('Videos due').item.json.win, stats: $('Views and likes').item.json, analytics: $('Retention').item.json, curve: $input.item.json } };"
+      }
+    },
+    {
       "id": "6acc23d5-b23f-3521-fbcc-416b7de43519",
       "name": "Save snapshot",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        1200,
+        1440,
         80
       ],
       "parameters": {
@@ -119,7 +133,7 @@
         "url": "http://render-worker:8080/analytics/snapshot",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ ({ job_id: $('Videos due').item.json.job_id, win: $('Videos due').item.json.win, stats: $('Views and likes').item.json, analytics: $('Retention').item.json, curve: $json }) }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
           "timeout": 60000
         }
@@ -198,7 +212,7 @@
         -140
       ],
       "parameters": {
-        "url": "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 90 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&dimensions=day&metrics=views&filters=creatorContentType==SHORTS&sort=day",
+        "url": "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 90 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&dimensions=day,creatorContentType&metrics=views&sort=day",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleOAuth2Api",
         "options": {}
@@ -223,12 +237,25 @@
       "onError": "continueRegularOutput"
     },
     {
+      "id": "c4fbf44d-f707-2e6a-261a-36e645a28366",
+      "name": "Bundle channel totals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        -140
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { channel: $('Channel').first().json, shorts: $('Shorts views by day').first().json, longform: $input.first().json } }];"
+      }
+    },
+    {
       "id": "637e3c93-bada-1c90-c8be-b3e3dfa3bf8f",
       "name": "Save channel totals",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        960,
+        1200,
         -140
       ],
       "parameters": {
@@ -236,7 +263,7 @@
         "url": "http://render-worker:8080/analytics/channel",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ ({ channel: $('Channel').item.json, shorts: $('Shorts views by day').item.json, longform: $json }) }}",
+        "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
           "timeout": 60000
         }
@@ -305,6 +332,17 @@
       "main": [
         [
           {
+            "node": "Bundle channel totals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bundle channel totals": {
+      "main": [
+        [
+          {
             "node": "Save channel totals",
             "type": "main",
             "index": 0
@@ -346,6 +384,17 @@
       ]
     },
     "Retention curve": {
+      "main": [
+        [
+          {
+            "node": "Bundle snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bundle snapshot": {
       "main": [
         [
           {
