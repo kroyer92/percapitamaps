@@ -63,10 +63,35 @@ async function chatOnce(base: string, o: ChatOpts): Promise<string> {
 // Hosted models speak the OpenAI chat format (Gemini and Groq both offer it). Their free tiers
 // answer in seconds; the VPS model takes minutes and is the last resort.
 interface Hosted { name: string; url: string; key: string; model: string }
-const HOSTED: Record<string, () => Hosted> = {
-  gemini: () => ({ name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', key: config.geminiKey, model: config.geminiModel }),
-  groq: () => ({ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: config.groqKey, model: config.groqModel }),
+const HOSTED: Record<string, () => Hosted[]> = {
+  gemini: () => config.geminiModels.map((model) => ({ name: 'gemini', url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', key: config.geminiKey, model })),
+  groq: () => [{ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: config.groqKey, model: config.groqModel }],
 };
+
+// "Busy" (503) and "too many requests" (429) pass in seconds, so wait and ask again before moving on.
+const BUSY_WAITS = [5_000, 15_000];
+// A model that stayed busy through every wait is skipped for a while, so each call doesn't pay the waits again.
+const REST_MS = 10 * 60_000;
+const restingUntil = new Map<string, number>();
+export const sleep = { ms: (ms: number) => new Promise((r) => setTimeout(r, ms)) };
+
+async function askHosted(h: Hosted, o: ChatOpts): Promise<string> {
+  const id = `${h.name}:${h.model}`;
+  for (let i = 0; ; i++) {
+    try {
+      return await chatHosted(h, o);
+    } catch (e: any) {
+      const busy = /^\S+ (503|429):/.test(e?.message ?? '');
+      if (!busy) throw e;
+      if (i >= BUSY_WAITS.length) {
+        restingUntil.set(id, Date.now() + REST_MS);
+        throw e;
+      }
+      console.warn(`[llm] ${id} is busy, asking again in ${BUSY_WAITS[i] / 1000} s`);
+      await sleep.ms(BUSY_WAITS[i]);
+    }
+  }
+}
 
 async function chatHosted(h: Hosted, o: ChatOpts, jsonMode = true): Promise<string> {
   llmStart();
@@ -103,8 +128,10 @@ async function chatHosted(h: Hosted, o: ChatOpts, jsonMode = true): Promise<stri
 function routes(): { name: string; ask: (o: ChatOpts) => Promise<string> }[] {
   const out: { name: string; ask: (o: ChatOpts) => Promise<string> }[] = [];
   for (const p of config.llmProviders) {
-    const h = HOSTED[p]?.();
-    if (h && h.key) out.push({ name: `${h.name}:${h.model}`, ask: (o) => chatHosted(h, o) });
+    for (const h of HOSTED[p]?.() ?? []) {
+      const name = `${h.name}:${h.model}`;
+      if (h.key && (restingUntil.get(name) ?? 0) <= Date.now()) out.push({ name, ask: (o) => askHosted(h, o) });
+    }
     // OLLAMA_URL first and OLLAMA_FALLBACK_URL if it is down (for example the PC when it is off).
     if (p === 'ollama') for (const base of new Set([config.ollamaUrl, config.ollamaFallbackUrl])) out.push({ name: `ollama:${config.ollamaModel}`, ask: (o) => chatAt(base, o) });
   }

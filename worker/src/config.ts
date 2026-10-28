@@ -34,7 +34,8 @@ export const config = {
   // Hosted models, tried in LLM_PROVIDERS order (default: every one with a key, then the VPS model).
   llmProviders: (env.LLM_PROVIDERS ?? 'gemini,groq,ollama').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
   geminiKey: env.GEMINI_API_KEY ?? '',
-  geminiModel: env.GEMINI_MODEL || 'gemini-3.8-flash',
+  // A comma list: when one model is busy (Google answers 503 at peak times), the next one is asked.
+  geminiModels: list(env.GEMINI_MODEL || 'gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite'),
   groqKey: env.GROQ_API_KEY ?? '',
   groqModel: env.GROQ_MODEL || 'openai/gpt-oss-120b',
   renderConcurrency: Math.max(1, Number(env.RENDER_CONCURRENCY ?? 1)),
