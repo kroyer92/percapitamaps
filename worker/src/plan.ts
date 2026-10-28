@@ -233,20 +233,21 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
     const low = f.ranking.slice(5, 10).reverse(); // #10 .. #6
     const names = low.map((r) => the(r.name));
     const lowList = `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+    // The map sits above the ladder: it flies to each country as the voice names it.
     return keep([
-      hookSlot(c, `counter:10`),
+      hookSlot(c, 'map_fill'),
       low.length ? {
         role: 'contender',
         brief: `Quickly run through numbers ${low[0].rank} to ${low.at(-1)!.rank}: ${lowList}. Names only, no values.`,
         numbers: [String(low[0].rank), String(low.at(-1)!.rank)],
         fallback: `Numbers ${low[0].rank} to ${low.at(-1)!.rank}: ${lowList}.`,
-        visual: `bar_add:${low.at(-1)!.iso3}`,
+        visual: 'map_fill',
         on_screen: `#${low[0].rank} to #${low.at(-1)!.rank}`,
       } as Slot : undefined,
-      guessSlot(c, 10, (iso) => `counter:${f.ranking.find((r) => r.iso3 === iso)?.rank ?? 10}`),
-      ...contenderSlots(c, 5, (iso) => `bar_add:${iso}`),
+      guessSlot(c, 10, (iso) => `zoom_to:${iso}`), // gets a pinned row of its own under the ladder
+      ...contenderSlots(c, 5, (iso) => `highlight:${iso}`),
       revealSlot(c),
-      closerSlot(c, 'counter:1'),
+      closerSlot(c, 'map_fill'),
     ]);
   }
 
@@ -333,6 +334,8 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
   if (format === 'GUESS' && f.guess) {
     const opts = f.guess.options;
     const list = opts.map((o) => `${o.letter}, ${the(o.name)}`).join('; ');
+    // The options are on screen from the first frame. Context comes before the pause, so nothing
+    // stands between the pause and the answer; after it, the map shows the answer and #2.
     return keep([
       hookSlot(c, 'map_fill'),
       {
@@ -343,11 +346,11 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
         visual: 'flag_row',
         on_screen: 'Pick one',
       },
-      { role: 'fixed', brief: 'Write exactly: Think about it.', numbers: [], fallback: 'Think about it.', visual: 'pause', on_screen: '3… 2… 1…' },
       medianSlot(c, 'flag_row'),
+      { role: 'fixed', brief: 'Write exactly: Think about it.', numbers: [], fallback: 'Think about it.', visual: 'pause', on_screen: `${opts.map((o) => o.letter).slice(0, -1).join(', ')} or ${opts.at(-1)!.letter}?` },
       revealSlot(c, 'the answer is'),
-      ...contenderSlots(c, 3, () => 'reveal_answer').slice(-1), // #2
-      closerSlot(c, 'reveal_answer'),
+      ...contenderSlots(c, 3, (iso) => `highlight:${iso}`).slice(-1), // #2
+      closerSlot(c, 'map_fill'),
     ]);
   }
   return undefined;

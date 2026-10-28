@@ -32,3 +32,11 @@ export function countdownSchedule(p: ShortProps): number[] {
   times.push(reveal);
   return times; // times[0] reveals #10 (or #n), last reveals #1
 }
+
+// The pause's countdown: when each number appears (3, 2, 1), counted back from the reveal.
+export function guessPauseTicks(p: ShortProps, fps = 30): number[] {
+  const pause = p.beats.find((b) => b.visual.startsWith('pause'));
+  const reveal = p.beats.find((b) => b.visual.startsWith('reveal_answer'))?.start;
+  if (!pause || reveal === undefined) return [];
+  return [3, 2, 1].map((k) => reveal - k * fps).filter((t) => t >= pause.start);
+}
