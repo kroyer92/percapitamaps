@@ -167,12 +167,94 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000
+    },
+    {
+      "id": "db7df955-3838-f0f7-ff06-419dbfd9930a",
+      "name": "Channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        -140
+      ],
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/channels?part=statistics&mine=true",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "e6d3ac14-6458-69ec-6dfd-8d228853b61b",
+      "name": "Shorts views by day",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        -140
+      ],
+      "parameters": {
+        "url": "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 90 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&dimensions=day&metrics=views&filters=creatorContentType==SHORTS&sort=day",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "56a31303-f9b8-62c1-23d2-64664794fb45",
+      "name": "Long-form watch time",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -140
+      ],
+      "parameters": {
+        "url": "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 365 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&metrics=estimatedMinutesWatched&filters=creatorContentType==VIDEO_ON_DEMAND",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "637e3c93-bada-1c90-c8be-b3e3dfa3bf8f",
+      "name": "Save channel totals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        -140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://render-worker:8080/analytics/channel",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ channel: $('Channel').item.json, shorts: $('Shorts views by day').item.json, longform: $json }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {
     "Every 6 hours": {
       "main": [
         [
+          {
+            "node": "Channel",
+            "type": "main",
+            "index": 0
+          },
           {
             "node": "Videos due",
             "type": "main",
@@ -185,7 +267,45 @@
       "main": [
         [
           {
+            "node": "Channel",
+            "type": "main",
+            "index": 0
+          },
+          {
             "node": "Videos due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Channel": {
+      "main": [
+        [
+          {
+            "node": "Shorts views by day",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shorts views by day": {
+      "main": [
+        [
+          {
+            "node": "Long-form watch time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Long-form watch time": {
+      "main": [
+        [
+          {
+            "node": "Save channel totals",
             "type": "main",
             "index": 0
           }

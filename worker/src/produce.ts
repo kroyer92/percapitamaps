@@ -15,6 +15,7 @@ import { pickVariant } from './tune.js';
 import { localDate } from './lib/time.js';
 import type { VoiceClip } from './voice.js';
 import type { MusicPick } from './audio.js';
+import * as office from './activity.js';
 
 export interface JobRow {
   id: number;
@@ -101,6 +102,7 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
     [topic.id, format, voice, lengthBand, hookType],
   );
   const id = job!.id;
+  office.working('writer', `Picked "${topic.question}" and is loading the data`, id);
   try {
     const facts = await loadFacts(ds, format);
     if (format === 'THEN_NOW' && (!facts.series || facts.series.years.length < 10)) {
@@ -114,22 +116,25 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
     if (format !== 'SCALE' && tied >= 2) {
       await q(`UPDATE jobs SET status = 'skipped', error = $2, updated_at = now() WHERE id = $1`, [id, `top ${tied} tied at ${facts.ranking[0].display}`]);
       await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [topic.id]);
+      office.finished('writer', `Skipped "${topic.question}": top ${tied} tied, no clear #1`, id);
       await alert(`Skipped "${topic.question}": the top ${tied} countries are all at ${facts.ranking[0].display}, so there is no #1.${skips < 2 ? ' Trying the next topic.' : ''}`);
       return skips < 2 ? produceOne(skips + 1) : undefined;
     }
     // The last 10 scripts, so the writer can steer clear of wording they already used.
     const recent = await q<{ script: Content['script'] }>(`SELECT script FROM jobs WHERE script IS NOT NULL AND id <> $1 ORDER BY id DESC LIMIT 10`, [id]);
     const recentLines = recent.map((r) => (r.script?.beats ?? []).map((b) => b.vo ?? ''));
-    const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined, recentLines, onStep: (step) => console.log(`[job ${id}] ${step}`) });
+    const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined, recentLines, onStep: (step) => { console.log(`[job ${id}] ${step}`); office.working('writer', step, id); } });
     await q(
       `UPDATE jobs SET script = $2, hooks = $3, packaging = $4, critic = $5, chosen_hook = $6, hook_type = $7, status = 'rendering', updated_at = now() WHERE id = $1`,
       [id, content.script, { list: content.hooks, original: content.originalHook }, content.packaging, content.critic, content.chosenHook, content.hookType],
     );
+    office.finished('writer', `Script ready: "${content.packaging.title}"`, id);
     await unloadModels();
     await renderAndPreview(id);
     return id;
   } catch (e: any) {
     const human = e instanceof NeedsHuman;
+    office.failJob(id, `${human ? 'Needs a human look' : 'Failed'}: ${e.message}`);
     await q(`UPDATE jobs SET status = $2, error = $3, attempts = attempts + 1, updated_at = now() WHERE id = $1`, [id, human ? 'needs_human' : 'render_failed', String(e.message ?? e)]);
     const t = await one<{ fail_count: number }>(
       `UPDATE topics SET fail_count = fail_count + 1, status = CASE WHEN fail_count + 1 >= 3 THEN 'failed' ELSE 'idea' END, priority = priority - 1 WHERE id = $1 RETURNING fail_count`,
@@ -154,7 +159,16 @@ export async function renderAndPreview(id: number, reuseClips = false): Promise<
     voice: job.voice,
     seed: id,
     reuseClips: reuseClips && job.render ? job.render.clips : undefined,
-  });
+    onStep: (step) => {
+      console.log(`[job ${id}] ${step}`);
+      if (step.startsWith('Recording')) office.working('narrator', `Recording the voice (${job.voice})`, id);
+      else if (step.startsWith('Voice recorded')) { office.finished('narrator', step, id); office.working('editor', 'Laying the voice on the timeline', id); }
+      else office.working('editor', step.replace(/ \(the first run.*\)$/, ''), id);
+    },
+    onProgress: (p) => office.progress('editor', p),
+  }).catch((e) => { office.failJob(id, `Render failed: ${e.message}`); throw e; });
+  office.finished('editor', `Rendered ${res.seconds.toFixed(1)} s of video`, id);
+  office.working('checker', 'Checking format, loudness, dead air, numbers and speech', id);
   const qa = await runQa({
     video: res.video,
     voiceTrack: path.join(dir, 'voice.wav'),
@@ -165,10 +179,13 @@ export async function renderAndPreview(id: number, reuseClips = false): Promise<
     numbersOk: true,
     criticVerdict: job.critic?.verdict,
     heard: res.heard,
-  });
+  }).catch((e) => { office.failJob(id, `QA crashed: ${e.message}`); throw e; });
   await q(`UPDATE jobs SET video_path = $2, render = $3, qa = $4, status = $5, updated_at = now() WHERE id = $1`, [
     id, res.video, { clips: res.clips, seconds: res.seconds, music: res.music }, qa, qa.passed ? 'awaiting_approval' : 'render_failed',
   ]);
+  const bad = qa.checks.filter((c) => c.status === 'fail').map((c) => c.name);
+  if (qa.passed) office.finished('checker', `All checks passed${qa.checks.some((c) => c.status === 'warn') ? ' (with warnings)' : ''}`, id);
+  else office.failed('checker', `Failed: ${bad.join(', ')}`, id);
   if (!qa.passed) {
     await alert(`Job #${id} failed QA:\n${qaSummary(qa)}`);
     return;
@@ -200,6 +217,7 @@ export async function sendPreview(id: number): Promise<void> {
   ];
   const messageId = await sendVideo(job.video_path!, lines.join('\n'), previewKeyboard(job));
   if (messageId) await q('UPDATE jobs SET telegram_message_id = $2 WHERE id = $1', [id, messageId]);
+  office.waiting('publisher', `#${id} is waiting for your OK in Telegram`, id);
 }
 
 export async function swapHook(id: number, index: number): Promise<void> {
