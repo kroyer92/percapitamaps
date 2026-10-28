@@ -54,8 +54,8 @@ GROQ_API_KEY=your-key-from-console.groq.com   # optional backup
 
 Order: `LLM_PROVIDERS` (default `gemini,groq,ollama`); a provider without a key is skipped, and
 one that is down or out of quota passes to the next. When a model answers "busy" (503) or "too
-many requests" (429) the worker asks again after 5 s and 15 s, then rests that model for 10 minutes
-and moves on. Models: `GEMINI_MODEL` (a comma list, default
+many requests" (429) the worker asks once more after 3 s; a model still busy, or one that gives no
+answer within 90 s, rests for 10 minutes and the next one is asked. Models: `GEMINI_MODEL` (a comma list, default
 `gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash-lite`, tried in order), `GROQ_MODEL` (default `openai/gpt-oss-120b`). The Telegram preview says which
 model wrote each video. Embeddings (the duplicate-topic check) stay on Ollama. Only public data,
 our own scripts and trend headlines go to these models, never YouTube API data.

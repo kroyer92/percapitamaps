@@ -68,9 +68,10 @@ const HOSTED: Record<string, () => Hosted[]> = {
   groq: () => [{ name: 'groq', url: 'https://api.groq.com/openai/v1/chat/completions', key: config.groqKey, model: config.groqModel }],
 };
 
-// "Busy" (503) and "too many requests" (429) pass in seconds, so wait and ask again before moving on.
-const BUSY_WAITS = [5_000, 15_000];
-// A model that stayed busy through every wait is skipped for a while, so each call doesn't pay the waits again.
+// "Busy" (503) and "too many requests" (429) sometimes pass in seconds, so ask once more. A model
+// still busy after that, or one that hangs without answering, is skipped for a while and the
+// next one is asked: at peak times every free Gemini model is busy, and Groq answers at once.
+const BUSY_WAITS = [3_000];
 const REST_MS = 10 * 60_000;
 const restingUntil = new Map<string, number>();
 export const sleep = { ms: (ms: number) => new Promise((r) => setTimeout(r, ms)) };
@@ -81,9 +82,11 @@ async function askHosted(h: Hosted, o: ChatOpts): Promise<string> {
     try {
       return await chatHosted(h, o);
     } catch (e: any) {
-      const busy = /^\S+ (503|429):/.test(e?.message ?? '');
-      if (!busy) throw e;
-      if (i >= BUSY_WAITS.length) {
+      const msg = e?.message ?? '';
+      const hung = e?.name === 'TimeoutError' || /timeout/i.test(msg);
+      const busy = /^\S+ (503|429):/.test(msg);
+      if (!busy && !hung) throw e;
+      if (hung || i >= BUSY_WAITS.length) {
         restingUntil.set(id, Date.now() + REST_MS);
         throw e;
       }
@@ -109,7 +112,7 @@ async function chatHosted(h: Hosted, o: ChatOpts, jsonMode = true): Promise<stri
           { role: 'user', content: o.user },
         ],
       }),
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.timeout(90_000), // these answer in seconds; a minute and a half means it is stuck
     });
     const text = await res.text();
     // Some models refuse JSON mode; the prompts ask for JSON anyway, so try once without it.
