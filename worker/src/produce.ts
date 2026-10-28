@@ -6,7 +6,7 @@ import { one, q } from './db.js';
 import { getDataset } from './datasets.js';
 import { loadFacts, type Facts } from './facts.js';
 import { generateContent, NeedsHuman, type Content, type Hook } from './content.js';
-import { unloadModels } from './llm.js';
+import { takeModelsUsed, unloadModels } from './llm.js';
 import { lowEndProblem } from './discover.js';
 import { renderShort } from './render.js';
 import { runQa, qaSummary, type QaReport } from './qa.js';
@@ -133,10 +133,11 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
     // The last 10 scripts, so the writer can steer clear of wording they already used.
     const recent = await q<{ script: Content['script'] }>(`SELECT script FROM jobs WHERE script IS NOT NULL AND id <> $1 ORDER BY id DESC LIMIT 10`, [id]);
     const recentLines = recent.map((r) => (r.script?.beats ?? []).map((b) => b.vo ?? ''));
+    takeModelsUsed(); // forget the topic checks; record only the models that write this video
     const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined, recentLines, onStep: (step) => { console.log(`[job ${id}] ${step}`); office.working('writer', step, id); } });
     await q(
       `UPDATE jobs SET script = $2, hooks = $3, packaging = $4, critic = $5, chosen_hook = $6, hook_type = $7, status = 'rendering', updated_at = now() WHERE id = $1`,
-      [id, content.script, { list: content.hooks, original: content.originalHook }, content.packaging, content.critic, content.chosenHook, content.hookType],
+      [id, { ...content.script, models: takeModelsUsed() }, { list: content.hooks, original: content.originalHook }, content.packaging, content.critic, content.chosenHook, content.hookType],
     );
     office.finished('writer', `Script ready: "${content.packaging.title}"`, id);
     await unloadModels();
@@ -216,7 +217,7 @@ export async function sendPreview(id: number): Promise<void> {
   const topic = await one<any>('SELECT * FROM topics WHERE id = $1', [job.topic_id]);
   const hooks = job.hooks?.list ?? [];
   const lines = [
-    `<b>#${id}</b> · ${FORMAT_NAMES[job.format]} · ${job.voice} · ${job.render?.seconds.toFixed(1)} s`,
+    `<b>#${id}</b> · ${FORMAT_NAMES[job.format]} · ${job.voice} · ${job.render?.seconds.toFixed(1)} s${job.script.models?.length ? ` · written by ${esc(job.script.models.join(', '))}` : ''}`,
     `<b>Q:</b> ${esc(topic.question)}`,
     `<b>Hook now:</b> ${esc(job.script.beats[0].vo)}`,
     ...hooks.map((h, i) => `${i === job.chosen_hook ? '▶' : `${i + 1}.`} ${esc(h.type)}: ${esc(h.text)}`),

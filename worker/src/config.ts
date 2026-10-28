@@ -31,6 +31,12 @@ export const config = {
   ollamaModel: env.OLLAMA_MODEL ?? 'qwen3:8b',
   ollamaNumCtx: Number(env.OLLAMA_NUM_CTX ?? 6144),
   ollamaEmbedModel: env.OLLAMA_EMBED_MODEL ?? 'nomic-embed-text',
+  // Hosted models, tried in LLM_PROVIDERS order (default: every one with a key, then the VPS model).
+  llmProviders: (env.LLM_PROVIDERS ?? 'gemini,groq,ollama').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+  geminiKey: env.GEMINI_API_KEY ?? '',
+  geminiModel: env.GEMINI_MODEL || 'gemini-3.8-flash',
+  groqKey: env.GROQ_API_KEY ?? '',
+  groqModel: env.GROQ_MODEL || 'openai/gpt-oss-120b',
   renderConcurrency: Math.max(1, Number(env.RENDER_CONCURRENCY ?? 1)),
   renderThreads: Math.max(1, Number(env.RENDER_THREADS ?? 3)),
   channelName: env.CHANNEL_NAME ?? 'Per Capita Maps',
