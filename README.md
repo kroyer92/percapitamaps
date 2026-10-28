@@ -42,6 +42,22 @@ n8n (schedules, YouTube credentials)          render-worker (this repo, worker/)
 
 Settings live in `app/.env` on the server (never in git). See the launch checklist for every key.
 
+## Language model
+
+Scripts, hooks, titles, the critic and the idea finder use a hosted model when a key is set, and
+the VPS model (Ollama) only as the last resort. Add to `app/.env`:
+
+```
+GEMINI_API_KEY=your-key-from-aistudio.google.com
+GROQ_API_KEY=your-key-from-console.groq.com   # optional backup
+```
+
+Order: `LLM_PROVIDERS` (default `gemini,groq,ollama`); a provider without a key is skipped, and
+one that is down or out of quota passes to the next. Models: `GEMINI_MODEL` (default
+`gemini-3.8-flash`), `GROQ_MODEL` (default `openai/gpt-oss-120b`). The Telegram preview says which
+model wrote each video. Embeddings (the duplicate-topic check) stay on Ollama. Only public data,
+our own scripts and trend headlines go to these models, never YouTube API data.
+
 ## Studio page
 
 An office you can open in the browser: a wall TV with the road to YPP and the qualifying date at

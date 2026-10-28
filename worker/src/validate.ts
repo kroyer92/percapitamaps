@@ -5,7 +5,7 @@ import { ISO3 } from './data/countries.js';
 // voiceover, on-screen text and title must appear in the facts.
 
 export interface Beat { vo: string; on_screen: string; visual: string; emphasis_words?: string[]; filler?: boolean }
-export interface Script { beats: Beat[]; loop_check?: string }
+export interface Script { beats: Beat[]; loop_check?: string; models?: string[] } // models: which language models wrote it
 
 const NUM = /\d[\d,]*(?:\.\d+)?/g;
 
