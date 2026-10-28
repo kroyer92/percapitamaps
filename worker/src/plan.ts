@@ -91,8 +91,9 @@ const contenderLines = (name: string, rank: number, value: string, start: number
 
 const withUnit = (display: string, unit: string) => (/^[\d.,]+$/.test(display) ? `${display} ${unit}` : display);
 
-// Big countries people tend to guess. Each video uses a different one (picked from the dataset
-// id, so the same video always gets the same guess), skipping any in the top 3.
+// Big countries people tend to guess. The guess rotates per dataset (picked from the dataset id, so
+// the same video always gets the same guess) among the three that rank highest, so it is a country
+// people would really name ("richest": the US, not Brazil at #68).
 const BIG_GUESSES = ['USA', 'IND', 'CHN', 'BRA', 'RUS', 'GBR', 'DEU', 'JPN'];
 const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 
@@ -109,7 +110,10 @@ const hookSlot = ({ question }: Ctx, visual: string): Slot => ({
 
 function guessSlot({ f, u, question }: Ctx, minRank: number, visual: (iso: string) => string): Slot | undefined {
   const byIso = new Map(f.ranking.map((r) => [r.iso3, r]));
-  const options = BIG_GUESSES.map((iso) => byIso.get(iso)).filter((r): r is RankRow => !!r && r.rank > minRank && r.iso3 !== f.ranking.at(-1)?.iso3); // the closer names the last one
+  const options = BIG_GUESSES.map((iso) => byIso.get(iso))
+    .filter((r): r is RankRow => !!r && r.rank > minRank && r.iso3 !== f.ranking.at(-1)?.iso3) // the closer names the last one
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, 3);
   const guess = options.at(hash(f.dataset_id ?? question) % Math.max(1, options.length));
   if (!guess) return undefined;
   return {
@@ -371,6 +375,10 @@ export function lineProblem(line: unknown, s: Slot, topName: string): string | u
   if (numbersIn(line).some((n) => !allowed.has(n))) return 'number not allowed';
   const must = s.numbers[0] ? numbersIn(s.numbers[0]) : [];
   if (must.length && !must.every((n) => numbersIn(line).includes(n))) return 'missing number';
+  // A question has to come before its answer: "Iceland is number 5 with $98,323. What's the fifth
+  // richest country?" asks what the line just said.
+  const q = line.lastIndexOf('?');
+  if (q >= 0 && must.length && !must.every((n) => numbersIn(line.slice(q + 1)).includes(n))) return 'question after the answer';
   return undefined;
 }
 

@@ -15,6 +15,35 @@ const SEEDS = [
   'which country drinks the most', 'smallest countries', 'countries with no', 'most visited countries',
   'which country uses the most', 'cheapest countries to live', 'countries with the best', 'safest countries',
 ];
+// Rankings always run from the highest value down, so a question about the low end ("cheapest",
+// "where $100 goes furthest") would reveal the wrong country.
+const LOW_END = /\b(cheapest|cheaper|least|lowest|fewest|poorest|smallest|furthest|farthest|most affordable)\b/i;
+export function lowEndProblem(question: string): string | undefined {
+  const m = question.match(LOW_END);
+  return m ? `asks about the low end ("${m[0]}"), but the video reveals the highest value` : undefined;
+}
+
+// Asks the model whether each dataset's #1 really answers its question. Angles it says no to are
+// dropped; if the call fails, all of them are kept (the word check in insertTopics still runs).
+async function fitsData(angles: Angle[], datasets: DatasetRow[]): Promise<{ keep: Angle[]; skipped: string[] }> {
+  const byId = new Map(datasets.map((d) => [d.id, d]));
+  const rows = angles.map((a) => ({ a, ds: byId.get(a.dataset_id) })).filter((r) => r.ds && r.a.question);
+  if (!rows.length) return { keep: angles, skipped: [] };
+  const res = await chatJson<{ fits?: unknown[] }>({
+    temperature: 0.1,
+    system: P.ANGLE_SYSTEM,
+    user: P.fitUser(rows.map((r) => ({ question: r.a.question, title: r.ds!.spec.title, unit: r.ds!.spec.unit }))),
+    numPredict: 200,
+  }).catch((e) => { console.warn('[discover] fit check failed, keeping all ideas:', e.message); return { fits: [] as unknown[] }; });
+  const fits = Array.isArray(res.fits) && res.fits.length === rows.length ? res.fits : undefined;
+  if (!fits) return { keep: angles, skipped: [] };
+  const bad = new Set(rows.filter((_, i) => fits[i] === false).map((r) => r.a));
+  return {
+    keep: angles.filter((a) => !bad.has(a)),
+    skipped: [...bad].map((a) => `${a.question}: the #1 of ${byId.get(a.dataset_id)?.spec.title} doesn't answer it`),
+  };
+}
+
 const SENSITIVE = /(war|killed|death toll|massacre|shooting|terror|suicide|election|vote|abortion|religion|gaza|ukraine|israel|genocide|rape)/i;
 
 interface Signal { source: string; text: string; score: number }
@@ -87,6 +116,8 @@ export async function insertTopics(angles: Angle[], datasets: DatasetRow[], sour
     if (!ds) { skipped.push(`${a.question}: unknown dataset ${a.dataset_id}`); continue; }
     if (!a.question || a.question.split(/\s+/).length > 14) { skipped.push(`${a.question}: question too long`); continue; }
     if (SENSITIVE.test(a.question)) { skipped.push(`${a.question}: sensitive`); continue; }
+    const low = lowEndProblem(a.question);
+    if (low) { skipped.push(`${a.question}: ${low}`); continue; }
     const format = (FORMAT_CODES as readonly string[]).includes(a.format) ? (a.format as Format) : 'MAP_REVEAL';
     let vector: number[] | null = null;
     try {
@@ -132,10 +163,12 @@ export async function discover(): Promise<{ signals: number; inserted: number; s
     user: P.angleUser(signals.map((s) => `[${s.source}] ${s.text}`).join('\n') || '(no signals today)', datasetTable(datasets), await recentTitles()),
     numPredict: 3000,
   });
-  working('scout', `Checking ${res.angles?.length ?? 0} ideas against a year of topics for repeats`);
-  const out = await insertTopics(res.angles ?? [], datasets, 'discover');
+  working('scout', `Checking that the data really answers each of ${res.angles?.length ?? 0} ideas`);
+  const fit = await fitsData(res.angles ?? [], datasets);
+  working('scout', `Checking ${fit.keep.length} ideas against a year of topics for repeats`);
+  const out = await insertTopics(fit.keep, datasets, 'discover');
   await unloadModels();
-  return { signals: signals.length, ...out };
+  return { signals: signals.length, inserted: out.inserted, skipped: [...fit.skipped, ...out.skipped] };
 }
 
 // /followup: two related videos in the same format, from nearby datasets.
@@ -153,7 +186,8 @@ export async function followup(jobId: number): Promise<{ inserted: number; skipp
     user: P.angleUser(`A video did very well: "${job.question}" (format ${job.format}). Propose follow-ups in the same format (${job.format}) that a viewer of that video would want next.`, datasetTable(pool.slice(0, 25)), await recentTitles(), 2),
   });
   const angles = (res.angles ?? []).slice(0, 2).map((a) => ({ ...a, format: job.format }));
-  const out = await insertTopics(angles, all, 'followup', 100);
+  const fit = await fitsData(angles, all);
+  const out = await insertTopics(fit.keep, all, 'followup', 100);
   await unloadModels();
-  return out;
+  return { inserted: out.inserted, skipped: [...fit.skipped, ...out.skipped] };
 }
