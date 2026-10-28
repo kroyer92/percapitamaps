@@ -7,6 +7,7 @@ import { getDataset } from './datasets.js';
 import { loadFacts, type Facts } from './facts.js';
 import { generateContent, NeedsHuman, type Content, type Hook } from './content.js';
 import { unloadModels } from './llm.js';
+import { lowEndProblem } from './discover.js';
 import { renderShort } from './render.js';
 import { runQa, qaSummary, type QaReport } from './qa.js';
 import { esc, sendVideo, say, alert, type Keyboard } from './telegram.js';
@@ -118,6 +119,15 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
       await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [topic.id]);
       office.finished('writer', `Skipped "${topic.question}": top ${tied} tied, no clear #1`, id);
       await alert(`Skipped "${topic.question}": the top ${tied} countries are all at ${facts.ranking[0].display}, so there is no #1.${skips < 2 ? ' Trying the next topic.' : ''}`);
+      return skips < 2 ? produceOne(skips + 1) : undefined;
+    }
+    // Ideas queued before the low-end check existed can still ask about the cheapest or poorest.
+    const low = lowEndProblem(topic.question);
+    if (low) {
+      await q(`UPDATE jobs SET status = 'skipped', error = $2, updated_at = now() WHERE id = $1`, [id, low]);
+      await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [topic.id]);
+      office.finished('writer', `Skipped "${topic.question}": ${low}`, id);
+      await alert(`Skipped "${topic.question}": it ${low}.${skips < 2 ? ' Trying the next topic.' : ''}`);
       return skips < 2 ? produceOne(skips + 1) : undefined;
     }
     // The last 10 scripts, so the writer can steer clear of wording they already used.

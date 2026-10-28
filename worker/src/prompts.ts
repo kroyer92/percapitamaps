@@ -11,7 +11,8 @@ Datasets you may use (id | title | unit | latest_year | countries):
 ${datasets}
 Already published or queued (do not repeat these angles or close variants):
 ${recent}
-Propose ${count} angles. Prefer angles where a viewer in the US or UK would confidently guess wrong. Use a trend signal when one genuinely fits; otherwise pick evergreen angles. About half should be about money, work, prices or technology.
+Propose ${count} angles. Every video ranks countries from the highest value of its dataset down, so each question must be answered by the country with the HIGHEST value, in the dataset's own terms (its title and unit). Never turn a measure into something it doesn't measure: GDP per person shows where people earn the most, not where money goes furthest or where life is cheapest. No questions about the lowest, cheapest, least or fewest.
+Prefer angles where a viewer in the US or UK would confidently guess wrong. Use a trend signal when one genuinely fits; otherwise pick evergreen angles. About half should be about money, work, prices or technology.
 Formats: MAP_REVEAL (world map fills in, twist revealed), COUNTDOWN (top 10 ranking), THEN_NOW (race over decades; only for datasets with a long history), SCALE (only for totals that can be split as "if the world were 100 ..."), GUESS (three options, then the answer).
 Return JSON only:
 {"angles":[{
@@ -22,6 +23,14 @@ Return JSON only:
  "trend_link": "the signal text it rides, or null",
  "scores": {"curiosity":1,"shareability":1,"comment_bait":1,"evergreen":1}
 }]}`;
+}
+
+// Second look at the proposed angles: does the dataset's #1 (its highest value) answer each question?
+export function fitUser(rows: { question: string; title: string; unit: string }[]): string {
+  return `Each video below ranks countries by one dataset, highest value first, and reveals the #1 as the answer to its question.
+For each, say whether "the country with the highest value of the dataset" honestly answers the question, using only what that dataset measures. Answer no when the question asks about the low end, or about something the dataset doesn't measure (prices, what money buys, causes, opinions).
+${rows.map((r, i) => `${i + 1}. Question: "${r.question}" | dataset: ${r.title} (${r.unit})`).join('\n')}
+Return JSON only: {"fits":[true,false,...]} with exactly ${rows.length} values, in order.`;
 }
 
 // Script, hooks, packaging and the critic all share this system prompt, so it starts with the
