@@ -360,12 +360,14 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
   return undefined;
 }
 
+const MAX_WORDS = 14; // the same limit validate.ts checks every beat against
+
 // Rules for one line. Anything that fails falls back to the slot's template line.
 export function lineProblem(line: unknown, s: Slot, topName: string): string | undefined {
   if (s.role === 'fixed') return 'fixed line';
   if (typeof line !== 'string' || !line.trim()) return 'empty';
   const w = wordCount(line);
-  if (w > (s.role === 'hook' ? 10 : 14)) return 'too long';
+  if (w > (s.role === 'hook' ? 10 : MAX_WORDS)) return 'too long';
   if (s.role !== 'hook' && w < 5) return 'too short';
   if (isBanned(line)) return 'banned phrase';
   if (s.country && !line.toLowerCase().includes(s.country.toLowerCase())) return 'missing country';
@@ -433,14 +435,21 @@ function shaper(countryNames: string[]) {
 }
 // The plain line for a slot: of its versions, the one whose shape this video and the last few
 // videos used least. Ties keep the order, which the plan already rotates per video.
-function plainLine(s: Slot, shape: (l: string) => Set<string>, usedHere: Set<string>, usedLately: Set<string>): string {
-  const options = [s.fallback, ...(s.alts ?? [])];
+// A plain line also has to fit the spoken-word limit. With a long unit ("812 applications per
+// million people") some versions don't, so those are left out; if none fit, the unit is dropped
+// from the line (the map key and captions still show it).
+function plainLine(s: Slot, shape: (l: string) => Set<string>, usedHere: Set<string>, usedLately: Set<string>, unit = ''): string {
+  const all = [s.fallback, ...(s.alts ?? [])];
+  const fits = (l: string) => wordCount(l) <= MAX_WORDS;
+  let options = all.filter(fits);
+  if (!options.length && unit) options = all.map((l) => l.split(` ${unit}`).join('')).filter(fits);
+  if (!options.length) options = all;
   const score = (l: string) => [...shape(l)].reduce((n, p) => n + (usedHere.has(p) ? 3 : 0) + (usedLately.has(p) ? 1 : 0), 0);
   return options.reduce((best, l) => (score(l) < score(best) ? l : best));
 }
 
 // recent: the spoken lines of the last few videos, one array per video.
-export async function writePlanned(system: string, slots: Slot[], topName: string, fixHint?: string, onStep: (s: string) => void = () => {}, recent: string[][] = [], countryNames: string[] = []): Promise<Script> {
+export async function writePlanned(system: string, slots: Slot[], topName: string, fixHint?: string, onStep: (s: string) => void = () => {}, recent: string[][] = [], countryNames: string[] = [], unit = ''): Promise<Script> {
   onStep(`Writing ${slots.length} planned lines`);
   const stale = stalePhrases(recent, slots, countryNames);
   const shape = shaper(countryNames);
@@ -456,7 +465,7 @@ export async function writePlanned(system: string, slots: Slot[], topName: strin
     let problem = lineProblem(lines[i], s, topName);
     if (!problem && overused(String(lines[i]), seen, planned)) problem = 'repeats a phrase';
     if (!problem && staleIn(String(lines[i]), stale)) problem = 'same wording as recent videos';
-    const vo = problem ? (s.role === 'fixed' ? s.fallback : plainLine(s, shape, usedHere, usedLately)) : String(lines[i]).trim();
+    const vo = problem ? (s.role === 'fixed' ? s.fallback : plainLine(s, shape, usedHere, usedLately, unit)) : String(lines[i]).trim();
     remember(vo, seen);
     shape(vo).forEach((p) => usedHere.add(p));
     if (problem && s.role !== 'fixed') fixed.push(`${i + 1} (${problem})`);
