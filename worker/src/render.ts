@@ -28,7 +28,13 @@ async function serveUrl(): Promise<string> {
 
 export function buildProps(format: Format, facts: Facts, ds: Pick<CatalogEntry, 'decimals' | 'prefix' | 'suffix' | 'threshold'>, beats: ShortProps['beats'], durationInFrames: number): ShortProps {
   const top = facts.ranking.slice(0, 15);
-  const anchorRows = facts.ranking.filter((r) => r.iso3 in facts.anchors && !top.includes(r));
+  // Also every country the video zooms to (the guess may be Russia at #14) and the Guess options.
+  const named = new Set([
+    ...Object.keys(facts.anchors),
+    ...beats.map((b) => b.visual.split(':')[1]?.toUpperCase()).filter(Boolean),
+    ...(facts.guess?.options.map((o) => o.iso3) ?? []),
+  ]);
+  const anchorRows = facts.ranking.filter((r) => named.has(r.iso3) && !top.includes(r));
   const ranking = [...top, ...anchorRows].map((r) => ({ ...r, iso2: iso3ToIso2(r.iso3) }));
   const props: ShortProps = {
     format,

@@ -70,16 +70,18 @@ export const Headline: React.FC<{ beats: TimedBeat[] }> = ({ beats }) => {
 export const Captions: React.FC<{ beats: TimedBeat[] }> = ({ beats }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const pages = useMemo(() => createTikTokStyleCaptions({
-    captions: beats.flatMap((b) => b.words.map((w, i) => ({
+  // Grouped beat by beat, so a page never joins the end of one line to the start of the next
+  // (on the Guess pause, "about it. The" would show the next line's first word too early).
+  const pages = useMemo(() => beats.flatMap((b) => createTikTokStyleCaptions({
+    captions: b.words.map((w, i) => ({
       text: i === 0 ? w.text : ` ${w.text}`,
       startMs: (w.start / fps) * 1000,
       endMs: (w.end / fps) * 1000,
       timestampMs: null,
       confidence: null,
-    }))),
+    })),
     combineTokensWithinMilliseconds: 650,
-  }).pages, [beats, fps]);
+  }).pages), [beats, fps]);
   const ms = (frame / fps) * 1000;
   const page = pages.find((p) => ms >= p.startMs && ms < p.startMs + p.durationMs);
   if (!page) return null;

@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { run } from './lib/proc.js';
 import { readWav, writeWav } from './audio.js';
-import { countdownSchedule } from '../remotion/schedule.js';
+import { countdownSchedule, guessPauseTicks } from '../remotion/schedule.js';
 import type { ShortProps } from '../remotion/types.js';
 
 const RATE = 48000;
@@ -52,9 +52,14 @@ export function sfxCues(p: ShortProps): SfxCue[] {
   if (p.format === 'COUNTDOWN') {
     const times = countdownSchedule(p);
     for (const t of times.slice(0, -1)) cues.push({ sound: 'tick', at: sec(t) });
+    // The map above the ladder flies to each country.
+    p.beats.slice(1).filter((b) => /^(zoom_to|highlight|bar_add):/.test(b.visual)).forEach((b) => cues.push({ sound: 'whoosh', at: sec(b.start) }));
   } else if (p.format === 'GUESS') {
-    const showFrom = p.beats.find((b) => b.visual.startsWith('flag_row'))?.start ?? p.beats[1]?.start ?? 20;
-    (p.guess?.options ?? []).forEach((_, i) => cues.push({ sound: 'tick', at: sec(showFrom + i * 6) }));
+    // The cards pop in on the first frames, the pause ticks down, and the map comes in after the answer.
+    (p.guess?.options ?? []).forEach((_, i) => cues.push({ sound: 'tick', at: sec(2 + i * 4) }));
+    guessPauseTicks(p, FPS).slice(0, -1).forEach((t) => cues.push({ sound: 'tick', at: sec(t) })); // the riser covers the last second
+    const after = reveal && p.beats.find((b) => b.start > reveal.start);
+    if (after) cues.push({ sound: 'whoosh', at: sec(after.start) });
   } else if (p.format === 'SCALE') {
     p.beats.slice(1).filter((b) => b.visual.startsWith('scale_grid')).forEach((b) => cues.push({ sound: 'tick', at: sec(b.start) }));
   } else {
