@@ -45,7 +45,29 @@ Settings live in `app/.env` on the server (never in git). See the launch checkli
 ## Telegram
 
 Buttons on each preview: Approve, Reject, Hook 1–5. Commands: `/status`, `/produce [n]`,
-`/link <job> <url>`, `/followup <job or url>`, `/help`.
+`/link <job> <url>`, `/followup <job or url>`, `/tune [on|off|reset]`, `/help`.
+
+## Automatic analysis
+
+At 24 h, 72 h and 7 days after each upload, WF5 pulls the YouTube numbers and the retention curve,
+the worker adds the Instagram Reel's insights, and `worker/src/scorecard.ts` scores the video:
+
+- **Stages:** stayed (engaged ÷ views, the API's stand-in for "viewed vs swiped away"), watched
+  (average % viewed), shares and subs per 1,000 engaged views; on Instagram skip rate, watch time
+  and share rate. Bands follow the per-video metric targets doc until 10 videos have the same
+  snapshot, then the channel's own bottom 20% / median / top 20%.
+- **Telegram message per snapshot:** Winner / Average / Loser / Too early, the steepest 2-second
+  drop in the retention curve and the script beat on screen then, and one fix for the first stage
+  that misses. Winners get a "Make 2 follow-ups" button.
+- **Sunday auto-tuning** (`worker/src/tune.ts`): HOOK_TEST and LENGTH_TEST options that earn more
+  engaged views get picked more often, at most 20 points a week, never under 10%. `/tune off`
+  goes back to the plain rotation, `/tune reset` to even weights.
+- **Weekly export for Claude** (`ANALYSIS_EXPORT=on`, `ANALYSIS_EXPORT_TOKEN` of 24+ random
+  characters): writes `public/analysis/<token>.json`. Keep it off until the YouTube API audit is
+  approved and `privacy.md` allows it.
+
+Instagram insights need the `instagram_business_manage_insights` permission on the token; without
+it the message says so and only YouTube is scored.
 
 ## Licenses of what it uses
 

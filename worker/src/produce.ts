@@ -11,6 +11,7 @@ import { renderShort } from './render.js';
 import { runQa, qaSummary, type QaReport } from './qa.js';
 import { esc, sendVideo, say, alert, type Keyboard } from './telegram.js';
 import { fitFormat, pickFormat, blockedFormat } from './formats.js';
+import { pickVariant } from './tune.js';
 import { localDate } from './lib/time.js';
 import type { VoiceClip } from './voice.js';
 import type { MusicPick } from './audio.js';
@@ -92,8 +93,8 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
   format = fitFormat(format, ds);
 
   const n = await nthJob();
-  const lengthBand = config.lengthTest.length ? config.lengthTest[n % config.lengthTest.length] : null;
-  const hookType = config.hookTest.length ? config.hookTest[n % config.hookTest.length] : null;
+  const lengthBand = await pickVariant('length', n);
+  const hookType = await pickVariant('hook', n);
   const voice = pickVoice();
   const job = await one<{ id: number }>(
     `INSERT INTO jobs (topic_id, status, format, voice, length_band, hook_type) VALUES ($1, 'producing', $2, $3, $4, $5) RETURNING id`,

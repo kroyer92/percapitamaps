@@ -63,6 +63,9 @@ export const config = {
   instagramApiVersion: env.INSTAGRAM_API_VERSION || 'v23.0',
   instagramDelayHours: Number(env.INSTAGRAM_DELAY_HOURS ?? 24),
   whisperModel: env.WHISPER_MODEL || 'small.en',
+  // Weekly analytics JSON for Claude's review; keep off until the YouTube API audit is approved.
+  analysisExport: (env.ANALYSIS_EXPORT ?? 'off').toLowerCase() === 'on',
+  analysisExportToken: env.ANALYSIS_EXPORT_TOKEN ?? '',
 };
 
 export const FORMAT_NAMES: Record<Format, string> = {

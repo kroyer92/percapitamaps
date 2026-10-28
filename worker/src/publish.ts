@@ -101,7 +101,7 @@ export async function linkVideo(id: number, videoId: string, url?: string): Prom
 
 // ---------- Instagram (WF4) ----------
 
-async function igToken(): Promise<string> {
+export async function igToken(): Promise<string> {
   const stored = await getSetting<{ token: string; refreshed_at: string }>('instagram_token');
   let token = stored?.token || config.instagramToken;
   const age = stored ? Date.now() - +new Date(stored.refreshed_at) : Infinity;
@@ -119,7 +119,7 @@ async function igToken(): Promise<string> {
   return token;
 }
 
-async function ig(pathPart: string, params: Record<string, string>, method = 'POST'): Promise<any> {
+export async function ig(pathPart: string, params: Record<string, string>, method = 'POST'): Promise<any> {
   const url = new URL(`https://graph.instagram.com/${config.instagramApiVersion}/${pathPart}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   const res = await fetch(url, { method, signal: AbortSignal.timeout(60_000) });

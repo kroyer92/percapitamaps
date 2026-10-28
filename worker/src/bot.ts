@@ -8,6 +8,7 @@ import { produceOne, swapHook, type JobRow } from './produce.js';
 import { approve, linkVideo, parseVideoId } from './publish.js';
 import { followup } from './discover.js';
 import { fmtIn } from './lib/time.js';
+import { setTune } from './tune.js';
 
 const HELP = [
   '<b>Per Capita Maps Studio</b>',
@@ -16,6 +17,7 @@ const HELP = [
   '/link &lt;job&gt; &lt;url&gt; – connect an uploaded video to its job',
   '/followup &lt;job or video URL&gt; – queue 2 related videos for a winner',
   '/produce [n] – make n videos now (default 1)',
+  '/tune [on|off|reset] – see or undo the weekly hook/length auto-tuning',
   '/status – queue, waiting approvals and next slots',
   '/help – this list',
 ].join('\n');
@@ -39,6 +41,14 @@ async function status(): Promise<string> {
     `Working on: ${qs.running.join(', ') || 'nothing'}${qs.waiting.length ? ` (then ${qs.waiting.join(', ')})` : ''}`,
     `Upcoming slots: ${slots.map((s) => `#${s.id} ${fmtIn(new Date(s.slot_at), config.localTz)}`).join(', ') || 'none booked'}`,
   ].join('\n');
+}
+
+async function queueFollowup(id: number): Promise<void> {
+  queue.add(`followup #${id}`, async () => {
+    const r = await followup(id);
+    await say(`➕ Follow-ups for #${id}: ${r.inserted} queued at top priority.${r.skipped.length ? `\nSkipped: ${esc(r.skipped.join('; '))}` : ''}`);
+  });
+  await say(`Working on follow-ups for #${id}…`);
 }
 
 async function onMessage(text: string): Promise<void> {
@@ -68,13 +78,12 @@ async function onMessage(text: string): Promise<void> {
     case '/followup': {
       const id = args[0] ? await jobFromRef(args[0]) : undefined;
       if (!id) { await say('Use it like this: <code>/followup 12</code> or <code>/followup https://youtube.com/shorts/…</code>'); return; }
-      queue.add(`followup #${id}`, async () => {
-        const r = await followup(id);
-        await say(`➕ Follow-ups for #${id}: ${r.inserted} queued at top priority.${r.skipped.length ? `\nSkipped: ${esc(r.skipped.join('; '))}` : ''}`);
-      });
-      await say(`Working on follow-ups for #${id}…`);
+      await queueFollowup(id);
       return;
     }
+    case '/tune':
+      await say(await setTune((args[0] ?? '').toLowerCase()));
+      return;
     default:
       if (text.startsWith('/')) await say(HELP);
   }
@@ -96,6 +105,9 @@ async function onCallback(cb: any): Promise<void> {
     await q(`UPDATE jobs SET status = 'rejected', updated_at = now() WHERE id = $1`, [id]);
     await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [job.topic_id]);
     await say(`❌ Rejected #${id}.`);
+  } else if (kind === 'fu') {
+    await clearButtons();
+    await queueFollowup(id);
   } else if (kind === 'hk') {
     if (job.status !== 'awaiting_approval') { await say(`#${id} is already ${job.status}.`); return; }
     await clearButtons();
@@ -116,6 +128,7 @@ export async function startBot(): Promise<void> {
       { command: 'produce', description: 'Make videos now: /produce 2' },
       { command: 'link', description: 'Connect an upload: /link 12 <url>' },
       { command: 'followup', description: 'Two related videos for a winner' },
+      { command: 'tune', description: 'See or undo auto-tuning: /tune off' },
       { command: 'help', description: 'All commands' },
     ],
   }).catch(() => undefined);

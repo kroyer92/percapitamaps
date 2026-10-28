@@ -137,13 +137,17 @@ wfs.push(workflow('wf5', 'WF5 Analyze', [
     url: "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $('Videos due').item.json.start_date }}&endDate={{ $('Videos due').item.json.end_date }}&metrics=views,engagedViews,averageViewPercentage,averageViewDuration,likes,shares,comments,subscribersGained&filters=video=={{ $('Videos due').item.json.video_id }}",
     authentication: 'predefinedCredentialType', nodeCredentialType: 'googleOAuth2Api', options: {},
   }, { onError: 'continueRegularOutput' }),
-  post('wf5', 'Save snapshot', `${W}/analytics/snapshot`, [960, 80],
-    "={{ JSON.stringify({ job_id: $('Videos due').item.json.job_id, win: $('Videos due').item.json.win, stats: $('Views and likes').item.json, analytics: $json }) }}"),
+  node('wf5', 'Retention curve', 'n8n-nodes-base.httpRequest', 4.2, [960, 80], {
+    url: "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $('Videos due').item.json.start_date }}&endDate={{ $('Videos due').item.json.end_date }}&dimensions=elapsedVideoTimeRatio&metrics=audienceWatchRatio,relativeRetentionPerformance&filters=video=={{ $('Videos due').item.json.video_id }}",
+    authentication: 'predefinedCredentialType', nodeCredentialType: 'googleOAuth2Api', options: {},
+  }, { onError: 'continueRegularOutput' }),
+  post('wf5', 'Save snapshot', `${W}/analytics/snapshot`, [1200, 80],
+    "={{ JSON.stringify({ job_id: $('Videos due').item.json.job_id, win: $('Videos due').item.json.win, stats: $('Views and likes').item.json, analytics: $('Retention').item.json, curve: $json }) }}"),
   schedule('wf5', 'Sunday 18:00 UTC', '0 18 * * 0', [0, 380]),
   post('wf5', 'Weekly report', `${W}/report/weekly`, [280, 380]),
 ], [
   link('Every 6 hours', 'Videos due'), link('Run manually', 'Videos due'), link('Videos due', 'Views and likes'),
-  link('Views and likes', 'Retention'), link('Retention', 'Save snapshot'), link('Sunday 18:00 UTC', 'Weekly report'),
+  link('Views and likes', 'Retention'), link('Retention', 'Retention curve'), link('Retention curve', 'Save snapshot'), link('Sunday 18:00 UTC', 'Weekly report'),
 ], errorWf));
 
 fs.mkdirSync(new URL('./workflows/', import.meta.url), { recursive: true });

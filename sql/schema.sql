@@ -92,6 +92,10 @@ CREATE TABLE IF NOT EXISTS metrics (
   raw            jsonb,
   PRIMARY KEY (job_id, win)
 );
+-- Retention curve, the Instagram Reel's insights and the scorecard verdict for each snapshot.
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS curve jsonb;  -- [[elapsed ratio, audience watch ratio], ...]
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS ig jsonb;     -- {views, reach, likes, saved, shares, avg_watch_sec, skip_rate, error}
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS score jsonb;  -- what scorecard.ts decided
 
 CREATE TABLE IF NOT EXISTS settings (
   key        text PRIMARY KEY,
