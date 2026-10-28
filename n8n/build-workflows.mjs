@@ -145,7 +145,24 @@ wfs.push(workflow('wf5', 'WF5 Analyze', [
     "={{ JSON.stringify({ job_id: $('Videos due').item.json.job_id, win: $('Videos due').item.json.win, stats: $('Views and likes').item.json, analytics: $('Retention').item.json, curve: $json }) }}"),
   schedule('wf5', 'Sunday 18:00 UTC', '0 18 * * 0', [0, 380]),
   post('wf5', 'Weekly report', `${W}/report/weekly`, [280, 380]),
+  // Channel totals for the studio's YPP wall.
+  node('wf5', 'Channel', 'n8n-nodes-base.httpRequest', 4.2, [240, -140], {
+    url: 'https://www.googleapis.com/youtube/v3/channels?part=statistics&mine=true',
+    authentication: 'predefinedCredentialType', nodeCredentialType: 'youTubeOAuth2Api', options: {},
+  }, { ...retry, onError: 'continueRegularOutput' }),
+  node('wf5', 'Shorts views by day', 'n8n-nodes-base.httpRequest', 4.2, [480, -140], {
+    url: "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 90 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&dimensions=day&metrics=views&filters=creatorContentType==SHORTS&sort=day",
+    authentication: 'predefinedCredentialType', nodeCredentialType: 'googleOAuth2Api', options: {},
+  }, { onError: 'continueRegularOutput' }),
+  node('wf5', 'Long-form watch time', 'n8n-nodes-base.httpRequest', 4.2, [720, -140], {
+    url: "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 365 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&metrics=estimatedMinutesWatched&filters=creatorContentType==VIDEO_ON_DEMAND",
+    authentication: 'predefinedCredentialType', nodeCredentialType: 'googleOAuth2Api', options: {},
+  }, { onError: 'continueRegularOutput' }),
+  post('wf5', 'Save channel totals', `${W}/analytics/channel`, [960, -140],
+    "={{ JSON.stringify({ channel: $('Channel').item.json, shorts: $('Shorts views by day').item.json, longform: $json }) }}"),
 ], [
+  link('Every 6 hours', 'Channel'), link('Run manually', 'Channel'), link('Channel', 'Shorts views by day'),
+  link('Shorts views by day', 'Long-form watch time'), link('Long-form watch time', 'Save channel totals'),
   link('Every 6 hours', 'Videos due'), link('Run manually', 'Videos due'), link('Videos due', 'Views and likes'),
   link('Views and likes', 'Retention'), link('Retention', 'Retention curve'), link('Retention curve', 'Save snapshot'), link('Sunday 18:00 UTC', 'Weekly report'),
 ], errorWf));

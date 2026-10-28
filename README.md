@@ -42,6 +42,41 @@ n8n (schedules, YouTube credentials)          render-worker (this repo, worker/)
 
 Settings live in `app/.env` on the server (never in git). See the launch checklist for every key.
 
+## Studio page
+
+An office you can open in the browser: a wall TV with the road to YPP and the qualifying date at
+the current pace, a whiteboard of the next videos and why each was picked, seven desks where the
+crew (Scout, Writer, Narrator, Editor, Checker, Publisher, Analyst) visibly work on the current
+job in real time, and monitors for video performance, earnings (locked until YPP) and the
+experiment lab. It is served by the render worker at `/studio/` (no extra container, about one
+database read every 30 seconds) and is read-only. Add `?demo` to the address to see it with
+example numbers and a video moving through the office.
+
+Setup on the server, once:
+
+1. Add `STUDIO_DOMAIN=studio.percapitamaps.duckdns.org` to `/opt/percapita/.env`.
+2. `docker compose exec caddy caddy hash-password` and type a password; copy the hash it prints.
+3. Add this block to `/opt/percapita/Caddyfile`, with the hash pasted in:
+
+   ```
+   {$STUDIO_DOMAIN} {
+     basic_auth {
+       niko PASTE_THE_HASH_HERE
+     }
+     redir / /studio/
+     handle /studio* {
+       reverse_proxy render-worker:8080
+     }
+     handle {
+       respond 404
+     }
+   }
+   ```
+
+   Only `/studio` is passed through, so the worker's other endpoints stay private.
+4. Pull, rebuild and restart: `cd app && git pull && cd .. && docker compose up -d --build`, then
+   re-import the workflows (WF5 now also fetches the channel totals for the wall TV).
+
 ## Telegram
 
 Buttons on each preview: Approve, Reject, Hook 1–5. Commands: `/status`, `/produce [n]`,

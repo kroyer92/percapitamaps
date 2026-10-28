@@ -1,6 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import { config } from './config.js';
+import { llmEnd, llmStart, llmTokens } from './activity.js';
 
 interface ChatOpts { temperature: number; system: string; user: string; numPredict?: number }
 
@@ -31,7 +32,7 @@ function postStream(url: string, body: string, timeoutMs: number): Promise<{ sta
     }, (res) => {
       res.setEncoding('utf8');
       let text = '';
-      res.on('data', (c: string) => (text += c));
+      res.on('data', (c: string) => { text += c; llmTokens(c.split('\n').filter(Boolean).length); });
       res.on('end', () => { clearTimeout(timer); resolve({ status: res.statusCode ?? 0, text }); });
       res.on('error', reject);
     });
@@ -42,6 +43,7 @@ function postStream(url: string, body: string, timeoutMs: number): Promise<{ sta
 }
 
 async function chatOnce(base: string, o: ChatOpts): Promise<string> {
+  llmStart();
   const { status, text: raw } = await postStream(`${base}/api/chat`, JSON.stringify({
     model: config.ollamaModel,
     stream: true,
@@ -53,7 +55,7 @@ async function chatOnce(base: string, o: ChatOpts): Promise<string> {
       { role: 'system', content: o.system },
       { role: 'user', content: o.user },
     ],
-  }), 15 * 60_000);
+  }), 15 * 60_000).finally(llmEnd);
   if (status !== 200) throw new Error(`Ollama ${status}: ${raw.slice(0, 300)}`);
   return raw.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l).message?.content ?? '').join('');
 }

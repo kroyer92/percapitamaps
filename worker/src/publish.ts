@@ -9,6 +9,7 @@ import { buildDescription, seriesTitle } from './content.js';
 import { esc, say } from './telegram.js';
 import { fmtIn, upcomingSlots } from './lib/time.js';
 import type { JobRow } from './produce.js';
+import * as office from './activity.js';
 
 const PLAYLIST_NAMES: Record<Format, string> = {
   MAP_REVEAL: 'Map Reveals', COUNTDOWN: 'Top 10 Countdowns', THEN_NOW: 'Then vs Now', SCALE: 'If the World Were 100 People', GUESS: 'Guess the Country',
@@ -41,6 +42,7 @@ export async function approve(id: number): Promise<void> {
   await q(`UPDATE topics SET status = 'done' WHERE id = $1`, [job.topic_id]);
 
   const when = `${fmtIn(slot, config.slotTz)} US Eastern = <b>${fmtIn(slot, config.localTz)} your time</b>`;
+  office.finished('publisher', `Approved #${id} for ${fmtIn(slot, config.localTz)} your time${config.youtubeApiUploads ? ', uploading' : ', upload pack sent'}`, id);
   const playlist = config.playlists[job.format] ? PLAYLIST_NAMES[job.format] : `${PLAYLIST_NAMES[job.format]} (no ID in app/.env yet)`;
   if (config.youtubeApiUploads) {
     await handToN8n(job, packaging, slot);
@@ -96,6 +98,7 @@ export async function linkVideo(id: number, videoId: string, url?: string): Prom
   );
   await q(`UPDATE datasets SET last_used_at = now() WHERE id = (SELECT dataset_id FROM topics WHERE id = $1)`, [job.topic_id]);
   await q(`UPDATE topics SET status = 'done' WHERE id = $1`, [job.topic_id]);
+  office.finished('publisher', `#${id} is live on YouTube`, id);
   return `🔗 Linked #${id} to ${videoId}. Analytics will track it${config.instagramToken ? `, and Instagram posts it ${config.instagramDelayHours} hours after it goes live` : ''}.`;
 }
 
@@ -135,6 +138,7 @@ export async function instagramDue(): Promise<{ posted: number[]; failed: string
   const failed: string[] = [];
   const token = await igToken();
   for (const job of due) {
+    office.working('publisher', `Posting #${job.id} to Instagram`, job.id);
     const name = `${crypto.randomBytes(12).toString('hex')}.mp4`;
     const file = path.join(config.mediaDir, 'ig', name);
     try {
@@ -152,9 +156,11 @@ export async function instagramDue(): Promise<{ posted: number[]; failed: string
       const media = await ig(`${config.instagramUserId}/media_publish`, { creation_id: container.id, access_token: token });
       await q(`UPDATE jobs SET ig_status = 'posted', ig_media_id = $2 WHERE id = $1`, [job.id, media.id]);
       posted.push(job.id);
+      office.finished('publisher', `#${job.id} is live on Instagram`, job.id);
     } catch (e: any) {
       await q(`UPDATE jobs SET ig_status = 'failed' WHERE id = $1`, [job.id]);
       failed.push(`#${job.id}: ${e.message}`);
+      office.failed('publisher', `Instagram refused #${job.id}: ${e.message}`, job.id);
     } finally {
       await fs.rm(file, { force: true });
     }

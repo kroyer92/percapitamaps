@@ -2,7 +2,7 @@
 // YouTube APIs (plus the Reel's Instagram insights), the scorecard message for each snapshot,
 // and the Sunday report with auto-tuning.
 import { config, FORMAT_NAMES, type Format } from './config.js';
-import { q } from './db.js';
+import { getSetting, q, setSetting } from './db.js';
 import { esc, say } from './telegram.js';
 import { ig, igToken } from './publish.js';
 import { score, mmss, type Grade, type IgInsights, type Score, type Snapshot, type VideoInfo } from './scorecard.js';
@@ -11,6 +11,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Beat } from './validate.js';
 import type { VoiceClip } from './voice.js';
+import * as office from './activity.js';
 
 const WINDOWS: { win: string; hours: number }[] = [
   { win: '24h', hours: 24 },
@@ -48,6 +49,7 @@ export async function storeSnapshot(body: any): Promise<void> {
   const a = analyticsRow(body.analytics);
   const num = (v: any) => (v === undefined || v === null || isNaN(Number(v)) ? null : Number(v));
   const jobId = Number(body.job_id);
+  office.working('analyst', `Reading the ${body.win} numbers for #${jobId}`, jobId);
   const ig = await igInsights(jobId);
   const curve = curveRows(body.curve);
   await q(
@@ -131,6 +133,7 @@ async function scoreAndTell(jobId: number, win: string): Promise<void> {
   const sc = score(snap, video, peers);
   await q('UPDATE metrics SET score = $3 WHERE job_id = $1 AND win = $2', [jobId, win, sc]);
   const keyboard = sc.verdict === 'winner' ? [[{ text: '➕ Make 2 follow-ups', callback_data: `fu:${jobId}` }]] : undefined;
+  office.finished('analyst', `#${jobId} at ${win}: ${VERDICT[sc.verdict]}, ${sc.reason}`, jobId);
   await say(scoreText(job, win, snap, sc), keyboard);
 }
 
@@ -162,6 +165,10 @@ function median(xs: number[]): number {
 }
 
 export async function weeklyReport(): Promise<string> {
+  return office.track('analyst', 'Writing the weekly report and re-tuning hooks and length', weeklyReportInner, () => 'Weekly report sent to Telegram');
+}
+
+async function weeklyReportInner(): Promise<string> {
   const rows = await q<{ id: number; format: Format; voice: string; hook_type: string; length_band: string; title: string; views: number; avg_view_pct: number; win: string }>(
     `SELECT DISTINCT ON (j.id) j.id, j.format, j.voice, j.hook_type, j.length_band, j.packaging->>'title' AS title, m.views, m.avg_view_pct, m.win
      FROM jobs j JOIN metrics m ON m.job_id = j.id
@@ -228,4 +235,41 @@ export async function writeExport(): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
   const file = path.join(dir, `${config.analysisExportToken}.json`);
   await fs.writeFile(file, JSON.stringify({ generated_at: new Date().toISOString(), channel: config.channelName, tune: await getTune(), videos: rows }, null, 1));
+}
+
+// WF5's channel totals for the studio's YPP wall: subscriber count (Data API), Shorts views per day
+// for the last 90 days and long-form watch time for the last 365 days (Analytics API). A subscriber
+// history, one point per day, gives the pace for the qualifying date.
+export interface ChannelStats {
+  subs: number | null;
+  shorts_daily: [string, number][]; // [YYYY-MM-DD, views], oldest first
+  shorts_views_90d: number | null;
+  longform_hours_365d: number | null;
+  fetched_at: string;
+  history: { d: string; subs: number }[];
+}
+
+export async function storeChannel(body: any): Promise<void> {
+  const old = await getSetting<ChannelStats>('channel');
+  const num = (v: any) => (v === undefined || v === null || isNaN(Number(v)) ? null : Number(v));
+  const subs = num(body.channel?.items?.[0]?.statistics?.subscriberCount);
+  const daily = analyticsRows(body.shorts);
+  const shortsDaily = daily.filter((r) => r.day).map((r) => [String(r.day), Number(r.views) || 0] as [string, number]).sort((a, b) => a[0].localeCompare(b[0]));
+  const minutes = analyticsRows(body.longform)[0]?.estimatedMinutesWatched;
+  const today = ymd(new Date());
+  const history = [...(old?.history ?? []).filter((h) => h.d !== today), ...(subs !== null ? [{ d: today, subs }] : [])].slice(-400);
+  const stats: ChannelStats = {
+    subs: subs ?? old?.subs ?? null,
+    shorts_daily: shortsDaily.length ? shortsDaily : old?.shorts_daily ?? [],
+    shorts_views_90d: shortsDaily.length ? shortsDaily.reduce((a, [, v]) => a + v, 0) : old?.shorts_views_90d ?? null,
+    longform_hours_365d: minutes !== undefined && !isNaN(Number(minutes)) ? Number(minutes) / 60 : old?.longform_hours_365d ?? null,
+    fetched_at: new Date().toISOString(),
+    history,
+  };
+  await setSetting('channel', stats);
+}
+
+function analyticsRows(a: any): Record<string, string | number>[] {
+  const headers: string[] = (a?.columnHeaders ?? []).map((h: any) => h.name);
+  return (a?.rows ?? []).map((row: any[]) => Object.fromEntries(headers.map((h, i) => [h, row[i]])));
 }

@@ -8,10 +8,12 @@ import { queue } from './lib/queue.js';
 import { produceOne, cleanupOldRenders } from './produce.js';
 import { discover } from './discover.js';
 import { instagramDue, linkVideo } from './publish.js';
-import { dueSnapshots, storeSnapshot, weeklyReport } from './analytics.js';
+import { dueSnapshots, storeChannel, storeSnapshot, weeklyReport } from './analytics.js';
 import { startBot } from './bot.js';
 import { alert, say, esc } from './telegram.js';
 import { run } from './lib/proc.js';
+import * as office from './activity.js';
+import { studio } from './studio.js';
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -32,7 +34,7 @@ app.post('/produce', (req, res) => {
 app.post('/discover', (_req, res) => {
   queue.add('discover', async () => {
     try {
-      const r = await discover();
+      const r = await office.track('scout', 'Reading Wikipedia, Reddit and YouTube search for trends', discover, (r) => `Found ${r.inserted} new topic${r.inserted === 1 ? '' : 's'} in ${r.signals} trend signals`);
       console.log(`[discover] ${r.signals} signals, ${r.inserted} new topics, ${r.skipped.length} skipped`);
     } catch (e: any) {
       console.error("[discover] failed:", e.message);
@@ -76,7 +78,14 @@ app.post('/analytics/snapshot', async (req, res) => {
   await storeSnapshot(req.body);
   res.json({ ok: true });
 });
+app.post('/analytics/channel', async (req, res) => {
+  await storeChannel(req.body);
+  res.json({ ok: true });
+});
 app.post('/report/weekly', async (_req, res) => res.json({ text: await weeklyReport() }));
+
+// The office page (Caddy puts it at STUDIO_DOMAIN behind a password).
+app.use('/studio', studio);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);

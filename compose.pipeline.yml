@@ -41,5 +41,10 @@ services:
     volumes:
       - ./app/n8n/workflows:/import/workflows:ro
 
+  # The studio page: Caddy needs the address for the studio block in the Caddyfile (README).
+  caddy:
+    environment:
+      STUDIO_DOMAIN: ${STUDIO_DOMAIN:-studio.invalid}
+
 volumes:
   worker_models: {}

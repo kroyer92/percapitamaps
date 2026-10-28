@@ -7,6 +7,7 @@ import { queue } from './lib/queue.js';
 import { produceOne, swapHook, type JobRow } from './produce.js';
 import { approve, linkVideo, parseVideoId } from './publish.js';
 import { followup } from './discover.js';
+import { track } from './activity.js';
 import { fmtIn } from './lib/time.js';
 import { setTune } from './tune.js';
 
@@ -45,7 +46,7 @@ async function status(): Promise<string> {
 
 async function queueFollowup(id: number): Promise<void> {
   queue.add(`followup #${id}`, async () => {
-    const r = await followup(id);
+    const r = await track('scout', `Finding 2 follow-ups to winner #${id}`, () => followup(id), (r) => `Queued ${r.inserted} follow-up${r.inserted === 1 ? '' : 's'} to #${id}`);
     await say(`➕ Follow-ups for #${id}: ${r.inserted} queued at top priority.${r.skipped.length ? `\nSkipped: ${esc(r.skipped.join('; '))}` : ''}`);
   });
   await say(`Working on follow-ups for #${id}…`);

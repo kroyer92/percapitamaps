@@ -5,6 +5,7 @@ import { one, q } from './db.js';
 import { chatJson, embed, unloadModels } from './llm.js';
 import * as P from './prompts.js';
 import { enabledDatasets, type DatasetRow } from './datasets.js';
+import { working } from './activity.js';
 
 const UA = 'PerCapitaMapsStudio/1.0 (private tool)';
 const SEEDS = [
@@ -124,12 +125,14 @@ async function recentTitles(): Promise<string> {
 export async function discover(): Promise<{ signals: number; inserted: number; skipped: string[] }> {
   const signals = await collectSignals();
   const datasets = (await enabledDatasets()).filter((d) => !d.last_used_at || Date.now() - +new Date(d.last_used_at) > 21 * 86_400_000);
+  working('scout', `Matching ${signals.length} trend signals to ${datasets.length} datasets`);
   const res = await chatJson<{ angles: Angle[] }>({
     temperature: 0.7,
     system: P.ANGLE_SYSTEM,
     user: P.angleUser(signals.map((s) => `[${s.source}] ${s.text}`).join('\n') || '(no signals today)', datasetTable(datasets), await recentTitles()),
     numPredict: 3000,
   });
+  working('scout', `Checking ${res.angles?.length ?? 0} ideas against a year of topics for repeats`);
   const out = await insertTopics(res.angles ?? [], datasets, 'discover');
   await unloadModels();
   return { signals: signals.length, ...out };
