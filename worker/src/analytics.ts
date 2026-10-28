@@ -254,9 +254,13 @@ export async function storeChannel(body: any): Promise<void> {
   const num = (v: any) => (v === undefined || v === null || isNaN(Number(v)) ? null : Number(v));
   const subs = num(body.channel?.items?.[0]?.statistics?.subscriberCount);
   const daily = analyticsRows(body.shorts);
-  const shortsDaily = daily.filter((r) => r.day).map((r) => [String(r.day), Number(r.views) || 0] as [string, number]).sort((a, b) => a[0].localeCompare(b[0]));
+  // Rows are split by day and content type ("shorts", "videoOnDemand", …); keep the Shorts views per day.
+  const isShorts = (r: Record<string, string | number>) => String(r.creatorContentType ?? '').toLowerCase() === 'shorts';
+  const perDay = new Map<string, number>();
+  for (const r of daily) if (r.day && isShorts(r)) perDay.set(String(r.day), (perDay.get(String(r.day)) ?? 0) + (Number(r.views) || 0));
+  const shortsDaily = [...perDay].sort((a, b) => a[0].localeCompare(b[0]));
   // One row per content type; everything but Shorts counts toward the long-form watch-hours path.
-  const longRows = analyticsRows(body.longform).filter((r) => r.creatorContentType !== 'SHORTS');
+  const longRows = analyticsRows(body.longform).filter((r) => !isShorts(r));
   const minutes = longRows.length ? longRows.reduce((a, r) => a + (Number(r.estimatedMinutesWatched) || 0), 0) : undefined;
   const today = ymd(new Date());
   const history = [...(old?.history ?? []).filter((h) => h.d !== today), ...(subs !== null ? [{ d: today, subs }] : [])].slice(-400);
