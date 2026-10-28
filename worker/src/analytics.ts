@@ -255,7 +255,9 @@ export async function storeChannel(body: any): Promise<void> {
   const subs = num(body.channel?.items?.[0]?.statistics?.subscriberCount);
   const daily = analyticsRows(body.shorts);
   const shortsDaily = daily.filter((r) => r.day).map((r) => [String(r.day), Number(r.views) || 0] as [string, number]).sort((a, b) => a[0].localeCompare(b[0]));
-  const minutes = analyticsRows(body.longform)[0]?.estimatedMinutesWatched;
+  // One row per content type; everything but Shorts counts toward the long-form watch-hours path.
+  const longRows = analyticsRows(body.longform).filter((r) => r.creatorContentType !== 'SHORTS');
+  const minutes = longRows.length ? longRows.reduce((a, r) => a + (Number(r.estimatedMinutesWatched) || 0), 0) : undefined;
   const today = ymd(new Date());
   const history = [...(old?.history ?? []).filter((h) => h.d !== today), ...(subs !== null ? [{ d: today, subs }] : [])].slice(-400);
   const stats: ChannelStats = {

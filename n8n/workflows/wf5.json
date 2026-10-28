@@ -119,7 +119,7 @@
         "url": "http://render-worker:8080/analytics/snapshot",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ job_id: $('Videos due').item.json.job_id, win: $('Videos due').item.json.win, stats: $('Views and likes').item.json, analytics: $('Retention').item.json, curve: $json }) }}",
+        "jsonBody": "={{ ({ job_id: $('Videos due').item.json.job_id, win: $('Videos due').item.json.win, stats: $('Views and likes').item.json, analytics: $('Retention').item.json, curve: $json }) }}",
         "options": {
           "timeout": 60000
         }
@@ -215,7 +215,7 @@
         -140
       ],
       "parameters": {
-        "url": "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 365 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&metrics=estimatedMinutesWatched&filters=creatorContentType==VIDEO_ON_DEMAND",
+        "url": "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $now.minus({ days: 365 }).toFormat('yyyy-MM-dd') }}&endDate={{ $now.toFormat('yyyy-MM-dd') }}&dimensions=creatorContentType&metrics=estimatedMinutesWatched",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleOAuth2Api",
         "options": {}
@@ -236,7 +236,7 @@
         "url": "http://render-worker:8080/analytics/channel",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ channel: $('Channel').item.json, shorts: $('Shorts views by day').item.json, longform: $json }) }}",
+        "jsonBody": "={{ ({ channel: $('Channel').item.json, shorts: $('Shorts views by day').item.json, longform: $json }) }}",
         "options": {
           "timeout": 60000
         }
