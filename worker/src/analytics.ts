@@ -302,13 +302,15 @@ export interface ChannelStats {
   shorts_views_90d: number | null;
   longform_hours_365d: number | null;
   fetched_at: string;
-  history: { d: string; subs: number }[];
+  history: { d: string; subs: number; views?: number }[]; // views: the channel's public view counter
 }
 
 export async function storeChannel(body: any): Promise<void> {
   const old = await getSetting<ChannelStats>('channel');
   const num = (v: any) => (v === undefined || v === null || isNaN(Number(v)) ? null : Number(v));
   const subs = num(body.channel?.items?.[0]?.statistics?.subscriberCount);
+  // The public view counter (Data API) is near real time; Analytics runs 2–3 days behind.
+  const counter = num(body.channel?.items?.[0]?.statistics?.viewCount);
   const daily = analyticsRows(body.shorts);
   // Rows are split by day and content type ("shorts", "videoOnDemand", …); keep the Shorts views per day.
   const isShorts = (r: Record<string, string | number>) => String(r.creatorContentType ?? '').toLowerCase() === 'shorts';
@@ -319,11 +321,23 @@ export async function storeChannel(body: any): Promise<void> {
   const longRows = analyticsRows(body.longform).filter((r) => !isShorts(r));
   const minutes = body.longform?.columnHeaders ? longRows.reduce((a, r) => a + (Number(r.estimatedMinutesWatched) || 0), 0) : undefined;
   const today = ymd(new Date());
-  const history = [...(old?.history ?? []).filter((h) => h.d !== today), ...(subs !== null ? [{ d: today, subs }] : [])].slice(-400);
+  const history = [...(old?.history ?? []).filter((h) => h.d !== today), ...(subs !== null ? [{ d: today, subs, ...(counter !== null ? { views: counter } : {}) }] : [])].slice(-400);
+  // Fill the Analytics lag with what the counter gained since the last day Analytics has: the
+  // counter's value stored for that day is its last reading of the day. Until such a reading exists,
+  // a channel with only Shorts and no long-form minutes can use the counter itself (all its views
+  // are Shorts, and its lifetime is under 90 days for now).
+  const analyticsViews = shortsDaily.length ? shortsDaily.reduce((a, [, v]) => a + v, 0) : null;
+  const lastDay = shortsDaily.at(-1)?.[0];
+  const atLastDay = history.find((h) => h.d === lastDay)?.views;
+  let shorts = analyticsViews ?? old?.shorts_views_90d ?? null;
+  if (analyticsViews !== null && counter !== null) {
+    if (atLastDay !== undefined) shorts = analyticsViews + Math.max(0, counter - atLastDay);
+    else if (!minutes) shorts = Math.max(analyticsViews, counter);
+  }
   const stats: ChannelStats = {
     subs: subs ?? old?.subs ?? null,
     shorts_daily: shortsDaily.length ? shortsDaily : old?.shorts_daily ?? [],
-    shorts_views_90d: shortsDaily.length ? shortsDaily.reduce((a, [, v]) => a + v, 0) : old?.shorts_views_90d ?? null,
+    shorts_views_90d: shorts,
     longform_hours_365d: minutes !== undefined && !isNaN(Number(minutes)) ? Number(minutes) / 60 : old?.longform_hours_365d ?? null,
     fetched_at: new Date().toISOString(),
     history,
