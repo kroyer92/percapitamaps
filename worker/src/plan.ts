@@ -248,7 +248,7 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
         visual: 'map_fill',
         on_screen: `#${low[0].rank} to #${low.at(-1)!.rank}`,
       } as Slot : undefined,
-      config.guessBeat ? guessSlot(c, 10, (iso) => `zoom_to:${iso}`) : undefined, // gets a pinned row of its own under the ladder
+      guessSlot(c, 10, (iso) => `zoom_to:${iso}`), // gets a pinned row of its own under the ladder
       ...contenderSlots(c, 5, (iso) => `highlight:${iso}`),
       revealSlot(c),
       closerSlot(c, 'map_fill'),
