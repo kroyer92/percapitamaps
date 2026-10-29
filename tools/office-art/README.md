@@ -9,36 +9,34 @@ What gets made: the seven robots (as hover robots with no arms or legs; the page
 hands), a desk, the coffee counter, the water cooler, the server rack, the sofa, a plant, your
 inbox and the view out of the window. That's 16 PNGs, together well under 1 MB.
 
-## Model
+## How it runs
 
-**Z-Image Turbo** (Alibaba Tongyi, 6B, Apache 2.0, so commercial use is fine), in ComfyUI.
-It needs 8 steps, which takes a few seconds per image on an RTX 5060 once the model is loaded.
-`workflow_api.json` loads the weights as fp8 (`weight_dtype: fp8_e4m3fn`), so the model fits in
-8 GB. Background removal uses rembg (MIT) with the `isnet-general-use` model, on the CPU.
+It's one Python script with no app to install. It runs **Z-Image Turbo** (Alibaba Tongyi, 6B,
+Apache 2.0, so commercial use is fine) straight on the GPU through Hugging Face diffusers. To fit
+in 8 GB, the transformer is loaded from a quantised GGUF file (`jayn7/Z-Image-Turbo-GGUF`, Q4_K_M,
+5 GB), and model offload moves each part onto the GPU only while it is working. Each image takes
+8 steps. rembg (MIT) cuts the background away on the CPU.
 
-## Once: install
+The first run downloads about 15 GB into the Hugging Face cache (`%USERPROFILE%\.cache\huggingface`).
+To remove everything afterwards, delete that cache folder and the `.venv` folder.
 
-1. Install ComfyUI. On Windows, the portable build or ComfyUI Desktop from comfy.org both work.
-   Start it.
-2. In ComfyUI, open **Workflow → Browse Templates**, choose **Z-Image Turbo** and let it download
-   the missing models. It puts three files in the right folders:
-   `models/diffusion_models/z_image_turbo_bf16.safetensors`,
-   `models/text_encoders/qwen_3_4b.safetensors` and `models/vae/ae.safetensors`.
-   Press Run once to check it makes an image.
-3. In a terminal, in this folder: `pip install "rembg[cpu]" pillow`
-
-If your files have other names (for example a ready-made fp8 or GGUF build), either edit the three
-file names in `workflow_api.json`, or open your working workflow in ComfyUI and use
-**Workflow → Export (API)**. Then pass that file with `--workflow my_workflow.json`. The script
-finds the prompt, seed and size through the KSampler node, so any normal text-to-image workflow
-works.
-
-If ComfyUI runs out of memory, restart it with `--lowvram`.
-
-## Every time you want new art
+## Once: set up (Windows, in this folder)
 
 ```
-python generate.py make                    # 4 candidates of all 16 assets, about 5 minutes
+py -3.12 -m venv .venv
+.venv\Scripts\activate
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install -U diffusers transformers accelerate gguf huggingface_hub "rembg[cpu]" pillow
+```
+
+The RTX 50 series needs the CUDA 12.8 (`cu128`) build of torch or newer. If
+`from diffusers import ZImagePipeline` fails, your diffusers is too old: run
+`pip install git+https://github.com/huggingface/diffusers`.
+
+## Make and pick
+
+```
+python generate.py make                    # 4 versions of all 16 assets
 python generate.py make --only scout,desk  # just some, or more tries of one
 ```
 
@@ -50,16 +48,17 @@ under the one you like for each asset, then:
 python generate.py pick scout=3 writer=1 narrator=4 editor=2 checker=1 publisher=2 analyst=3 desk=1
 ```
 
-This crops each pick, scales it to the size the page draws it at (2–3× larger, so it stays sharp on phone screens),
-and writes it to `worker/studio/office/art/` along with `manifest.json`. To check the result,
-open the page with `?demo`, or run the worker locally. Commit the `art` folder, then
-`git pull` and rebuild the worker on the VPS.
+This crops each pick, scales it to the size the page draws it at (2–3× larger, so it stays sharp
+on phone screens), and writes it to `worker/studio/office/art/` along with `manifest.json`.
+Commit the `art` folder, then `git pull` and rebuild the worker on the VPS. To go back to the
+code-drawn version of something, delete its line from `manifest.json`.
 
-To go back to the code-drawn version of something, delete its line from `manifest.json`.
+If it runs out of GPU memory, try `--offload sequential` (slower) or `--quant Q3_K_M` (smaller).
+If the output looks soft, `--quant Q6_K` is sharper.
 
 ## Changing the look
 
 The prompts are in `assets.json`. `style` goes on every robot and prop, and `robot` is the
 template for each robot, using its `color` and `gear`. Keep "plain pure white background" in the
-style, because the cut-out depends on it. If the robots come out with arms or legs, run more
-candidates; the negative prompt does little at Z-Image Turbo's cfg 1.
+style, because the cut-out depends on it. Z-Image Turbo runs without a negative prompt, so if a
+robot comes out with arms or legs, make more candidates.

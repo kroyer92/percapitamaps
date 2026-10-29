@@ -1,20 +1,16 @@
-"""Make the art for the studio page's office on your own GPU, through a local ComfyUI.
+"""Make the art for the studio page's office on your own GPU (Z-Image Turbo through diffusers).
 
   python generate.py make                 4 candidates of every asset -> out/, then opens out/pick.html
   python generate.py make --only scout,desk --count 6
   python generate.py pick scout=2 desk=1  copies your picks into worker/studio/office/art/ + manifest.json
 
 The page keeps its code-drawn version of anything you have not picked, so you can do this in
-parts. Needs ComfyUI running (default http://127.0.0.1:8188) and: pip install "rembg[cpu]" pillow
+parts. Setup (one venv, no other programs): see README.md.
 """
 import argparse
 import json
 import random
 import sys
-import time
-import urllib.parse
-import urllib.request
-import uuid
 import webbrowser
 from pathlib import Path
 
@@ -32,71 +28,65 @@ def prompt_for(cfg, a):
     return body if a["kind"] == "view" else f'{body}, {cfg["style"]}'
 
 
-# ---------- ComfyUI ----------
-def call(server, path, body=None):
-    req = urllib.request.Request(server + path, data=json.dumps(body).encode() if body is not None else None,
-                                 headers={"Content-Type": "application/json"} if body is not None else {})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return r.read()
+# ---------- the model, straight on the GPU ----------
+MODEL = "Tongyi-MAI/Z-Image-Turbo"     # Apache 2.0
+GGUF_REPO = "jayn7/Z-Image-Turbo-GGUF"  # the same weights, quantised so they fit in 8 GB
 
 
-def patch(workflow, text, negative, seed, size):
-    """Fill in prompt, seed and size, found through the KSampler so an exported workflow works too."""
-    wf = json.loads(json.dumps(workflow))
-    ks = next((n for n in wf.values() if n["class_type"].startswith("KSampler")), None)
-    if not ks:
-        sys.exit("The workflow has no KSampler node.")
-    ks["inputs"]["seed"] = seed
-    wf[ks["inputs"]["positive"][0]]["inputs"]["text"] = text
-    neg = ks["inputs"].get("negative")
-    if neg and "text" in wf[neg[0]]["inputs"]:
-        wf[neg[0]]["inputs"]["text"] = negative
-    latent = wf[ks["inputs"]["latent_image"][0]]["inputs"]
-    latent["width"], latent["height"] = size
-    return wf
+def load_pipeline(args):
+    """Z-Image Turbo through diffusers. The 6B transformer is loaded from a GGUF file (about 4 GB at
+    Q4_K_M) and model offload keeps only the part that is working on the GPU, so an 8 GB card is enough."""
+    import torch
+    from diffusers import GGUFQuantizationConfig, ZImagePipeline, ZImageTransformer2DModel
+    from huggingface_hub import hf_hub_download
+
+    if not torch.cuda.is_available():
+        sys.exit("PyTorch can't see the GPU. Install the CUDA build of torch (see README.md).")
+    from huggingface_hub import list_repo_files
+    match = [f for f in list_repo_files(GGUF_REPO) if f.endswith(f"{args.quant}.gguf")]
+    if not match:
+        sys.exit(f"No {args.quant} file in {GGUF_REPO}.")
+    gguf = hf_hub_download(GGUF_REPO, match[0])
+    transformer = ZImageTransformer2DModel.from_single_file(
+        gguf, quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16), torch_dtype=torch.bfloat16)
+    pipe = ZImagePipeline.from_pretrained(MODEL, transformer=transformer, torch_dtype=torch.bfloat16)
+    if args.offload == "model":
+        pipe.enable_model_cpu_offload()
+    elif args.offload == "sequential":  # slowest, smallest: for when "model" still runs out of memory
+        pipe.enable_sequential_cpu_offload()
+    else:
+        pipe.to("cuda")
+    return pipe
 
 
-def render(server, wf):
-    client = str(uuid.uuid4())
-    pid = json.loads(call(server, "/prompt", {"prompt": wf, "client_id": client}))["prompt_id"]
-    for _ in range(600):  # 10 minutes; Z-Image Turbo takes seconds once loaded
-        hist = json.loads(call(server, f"/history/{pid}"))
-        if pid in hist:
-            entry = hist[pid]
-            if entry.get("status", {}).get("status_str") == "error":
-                sys.exit(f"ComfyUI reported an error: {json.dumps(entry['status'].get('messages', []))[:800]}")
-            for out in entry["outputs"].values():
-                for img in out.get("images", []):
-                    q = urllib.parse.urlencode({"filename": img["filename"], "subfolder": img["subfolder"], "type": img["type"]})
-                    return call(server, f"/view?{q}")
-        time.sleep(1)
-    sys.exit("ComfyUI did not finish within 10 minutes.")
+def render(pipe, text, seed, size):
+    import torch
+    width, height = size
+    return pipe(prompt=text, width=width, height=height, num_inference_steps=9, guidance_scale=0.0,
+                generator=torch.Generator("cpu").manual_seed(seed)).images[0]
 
 
 # ---------- commands ----------
 def make(args):
-    from io import BytesIO
-    from PIL import Image
     from rembg import new_session, remove
 
     cfg = load_assets()
-    workflow = json.loads(Path(args.workflow).read_text(encoding="utf-8"))
     names = args.only.split(",") if args.only else list(cfg["assets"])
-    try:
-        call(args.server, "/system_stats")
-    except OSError:
-        sys.exit(f"Can't reach ComfyUI at {args.server}. Start it first (see README.md).")
-    session = new_session("isnet-general-use")
     for name in names:
-        a = cfg["assets"].get(name) or sys.exit(f"Unknown asset {name!r}. Known: {', '.join(cfg['assets'])}")
+        if name not in cfg["assets"]:
+            sys.exit(f"Unknown asset {name!r}. Known: {', '.join(cfg['assets'])}")
+    session = new_session("isnet-general-use")
+    print("Loading Z-Image Turbo (the first run downloads about 15 GB)…", flush=True)
+    pipe = load_pipeline(args)
+    for name in names:
+        a = cfg["assets"][name]
         folder = OUT / name
         folder.mkdir(parents=True, exist_ok=True)
         start = len(list(folder.glob("*-raw.png")))
         for i in range(start + 1, start + args.count + 1):
             seed = random.randint(1, 2**31)
             print(f"{name} {i}: rendering (seed {seed})", flush=True)
-            png = render(args.server, patch(workflow, prompt_for(cfg, a), cfg["negative"], seed, a["size"]))
-            img = Image.open(BytesIO(png)).convert("RGBA")
+            img = render(pipe, prompt_for(cfg, a), seed, a["size"]).convert("RGBA")
             img.save(folder / f"{i}-raw.png")
             if a["kind"] != "view":
                 img = remove(img, session=session)
@@ -158,8 +148,8 @@ def main():
     m = sub.add_parser("make", help="render candidates in ComfyUI")
     m.add_argument("--only", help="comma-separated assets, e.g. scout,writer,desk")
     m.add_argument("--count", type=int, default=4)
-    m.add_argument("--server", default="http://127.0.0.1:8188")
-    m.add_argument("--workflow", default=str(HERE / "workflow_api.json"), help="a ComfyUI workflow saved with Export (API)")
+    m.add_argument("--quant", default="Q4_K_M", help=f"which quantised file from {GGUF_REPO}: Q3_K_M is smaller, Q6_K sharper")
+    m.add_argument("--offload", choices=["model", "sequential", "none"], default="model")
     m.add_argument("--no-open", action="store_true")
     k = sub.add_parser("pick", help="copy picked candidates into the studio page")
     k.add_argument("choices", nargs="+", metavar="asset=N")

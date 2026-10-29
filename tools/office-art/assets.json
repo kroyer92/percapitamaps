@@ -1,7 +1,6 @@
 {
   "style": "flat vector game sprite, soft cel shading, clean thick dark outline, friendly cozy office game art, front view, full object visible, centered, plain pure white background, no shadow, no text, no watermark",
   "robot": "cute small hover robot mascot, chibi proportions, rounded glossy {color} plastic body, big dark rounded screen face with two glowing mint green oval eyes and a small smile, short antenna on top, no arms, no legs, floats in the air, {gear}",
-  "negative": "arms, legs, hands, feet, text, letters, watermark, logo, background scenery, floor, shadow, photo, realistic, blurry, cropped",
   "assets": {
     "scout":     { "kind": "robot", "color": "sky blue",          "gear": "a tiny satellite dish on its head",           "size": [832, 1024], "out": [192, 240] },
     "writer":    { "kind": "robot", "color": "warm amber yellow", "gear": "a yellow pencil tucked behind its head",      "size": [832, 1024], "out": [192, 240] },
