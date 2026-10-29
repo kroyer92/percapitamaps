@@ -348,8 +348,6 @@ function paintQueue(qs) {
 }
 
 // ---------- wall TV ----------
-const wallNow = {};
-const officeWall = (part) => { Object.assign(wallNow, part); office?.wall(wallNow); };
 function paintTv(s) {
   const y = s.ypp, rule = y.rules.now, next = y.rules.from;
   const w = (v, t) => `${Math.max(2, Math.min(100, ((v || 0) / t) * 100)).toFixed(1)}%`;
@@ -363,14 +361,6 @@ function paintTv(s) {
   const src = y.source === 'youtube'
     ? `From YouTube${y.fetched_at ? `, updated ${since(y.fetched_at)} ago` : ''}. Views are near real time; watch hours are long-form only and run 2–3 days behind Studio.`
     : 'Estimated from the tracked videos until WF5 fetches the channel totals.';
-  const short = (d) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(d));
-  officeWall({
-    rows: [
-      { label: 'Subscribers', value: `${y.subs == null ? '–' : Math.round(y.subs).toLocaleString('en-US')} / ${fmt(rule.subs)}`, share: (y.subs || 0) / rule.subs },
-      { label: 'Shorts views, 90 days', value: `${fmt(y.shorts_views_90d)} / ${fmt(rule.shorts)}`, share: (y.shorts_views_90d || 0) / rule.shorts },
-    ],
-    eta: !y.eta.ready ? 'Qualifying date: needs a few more days' : y.eta.date ? `On pace for ${short(y.eta.date)}` : 'Not on pace within two years',
-  });
   $('tv').innerHTML = `
     <div class="h">Road to monetization (YouTube Partner Program)</div>
     ${meter('Subscribers', y.subs, rule.subs, false, false)}
@@ -391,7 +381,6 @@ function paintBoard(s) {
   $('notes').innerHTML = wb.notes.length
     ? wb.notes.map((n) => `<div class="note"><b>${esc(n.title)}</b>${meta(n)}<div class="why"><b>Why:</b> ${esc(n.why)}</div></div>`).join('')
     : '<div class="empty">The board is empty: no topics in the queue. Run WF1 (Discover) or queue the launch concepts.</div>';
-  officeWall({ notes: wb.notes.map((n) => n.title) });
   const c = wb.counts;
   $('chips').innerHTML = [
     `<span class="chip${c.awaiting ? ' hot' : ''}">${c.awaiting} waiting for your OK in Telegram</span>`,

@@ -19,7 +19,7 @@ const DESK = { scout: [130, 330], writer: [310, 330], narrator: [490, 330], edit
 const NEXT = { writer: 'narrator', narrator: 'editor', editor: 'checker', checker: 'publisher' };
 const CARRY = { writer: 'paper', narrator: 'tape', editor: 'film', checker: 'film' };
 const BULB = { idle: '#9aa8b5', working: '#2fd38a', done: '#4fb3ff', waiting: '#f0b354', failed: '#ff5a45' };
-const FREE_SPOTS = ['coffee', 'coffee2', 'cooler', 'cooler2', 'sofa1', 'sofa2', 'window', 'tv', 'board', 'plant'];
+const FREE_SPOTS = ['coffee', 'coffee2', 'cooler', 'cooler2', 'sofa1', 'sofa2', 'window', 'shelf', 'poster', 'plant'];
 const GEAR = { scout: 'dish', writer: 'pencil', narrator: 'phones', editor: 'visor', checker: 'glasses', publisher: 'plane', analyst: 'chart' };
 // Where each piece of GPU art goes (x, y, width, height of its box; drawn bottom-centred).
 const PROP_BOX = {
@@ -42,7 +42,7 @@ for (const id in DESK) {
   node(`give-${id}`, x + 70, y + 6); node(`ga-${id}`, x + 70, row2 ? AISLE_B : AISLE_A); link(`give-${id}`, `ga-${id}`);
 }
 node('inbox', 150, 566); node('a-inbox', 150, AISLE_A); node('b-inbox', 150, AISLE_B); link('inbox', 'a-inbox'); link('inbox', 'b-inbox');
-node('window', 80, WALL + 4); node('tv', 380, WALL + 4); node('board', 720, WALL + 4);
+node('window', 80, WALL + 4); node('shelf', 320, WALL + 4); node('poster', 640, WALL + 4);
 node('coffee', 905, 312); node('a-coffee', 905, AISLE_A); link('coffee', 'a-coffee');
 node('coffee2', 960, 318); node('a-coffee2', 960, AISLE_A); link('coffee2', 'a-coffee2');
 node('cooler', 1078, 318); node('cooler2', 1040, 322); node('a-cooler', 1060, AISLE_A); link('cooler', 'a-cooler'); link('cooler2', 'a-cooler');
@@ -100,27 +100,23 @@ function create(svg, { crew, onSelect, tz = () => undefined, artBase = 'office/a
   const view = el('image', { x: 34, y: 48, width: 134, height: 134, preserveAspectRatio: 'xMidYMid slice', 'clip-path': 'url(#of-win)', visibility: 'hidden' }, svg);
   el('path', { d: 'M101 48v134M34 115h134', stroke: '#8a6a50', 'stroke-width': 5 }, svg);
 
-  // wall TV: the road to YPP, small
-  const tv = el('g', {}, svg);
-  el('rect', { x: 210, y: 34, width: 330, height: 168, rx: 10, fill: '#0e1822' }, tv);
-  el('rect', { x: 220, y: 44, width: 310, height: 148, rx: 4, fill: '#12304a' }, tv);
-  T(236, 68, 'ROAD TO MONETIZATION', { fill: '#7fbde6', 'font-size': 11, 'font-family': FONT, 'font-weight': 700, 'letter-spacing': 1.5 }, tv);
-  const tvRows = [0, 1].map((i) => {
-    const y = 94 + i * 40;
-    const label = T(236, y, '', { fill: '#e6edf4', 'font-size': 13, 'font-family': FONT }, tv);
-    const value = T(514, y, '', { fill: '#e6edf4', 'font-size': 13, 'text-anchor': 'end', 'font-family': FONT, 'font-weight': 600 }, tv);
-    el('rect', { x: 236, y: y + 8, width: 278, height: 9, rx: 4.5, fill: '#1f4766' }, tv);
-    const bar = el('rect', { x: 236, y: y + 8, width: 6, height: 9, rx: 4.5, fill: '#e0a03c' }, tv);
-    return { label, value, bar };
-  });
-  const tvEta = T(236, 178, '', { fill: '#f0c879', 'font-size': 12, 'font-family': FONT }, tv);
-  el('rect', { x: 360, y: 202, width: 30, height: 6, fill: '#0e1822' }, tv);
-
-  // whiteboard: the next topics as sticky notes
-  el('rect', { x: 580, y: 38, width: 250, height: 160, rx: 4, fill: '#f7f9fb', stroke: '#9aa8b5', 'stroke-width': 5 }, svg);
-  T(596, 60, 'COMING UP', { fill: '#12263a', 'font-size': 10, 'font-family': FONT, 'font-weight': 700, 'letter-spacing': 1.2 }, svg);
-  const notesG = el('g', {}, svg);
-  const NOTE_COL = ['#fdeeb5', '#d9ecfb', '#dff0df', '#fbdcd2', '#e8e0f6', '#fdeeb5'];
+  // Decor only: the real wall TV and whiteboard sit above the office on the page.
+  // bookshelf
+  el('rect', { x: 236, y: 60, width: 168, height: 150, rx: 4, fill: '#8a5a3c' }, svg);
+  for (let r = 0; r < 3; r++) {
+    el('rect', { x: 244, y: 68 + r * 47, width: 152, height: 39, fill: '#5b3d26' }, svg);
+    let x = 248;
+    for (let k = 0; x < 380; k++) {
+      const w = 9 + ((r * 7 + k * 5) % 8), h = 26 + ((r * 3 + k * 11) % 12);
+      el('rect', { x, y: 107 + r * 47 - h, width: w, height: h, rx: 1.5, fill: ['#4f98c6', '#e0a03c', '#6f9f80', '#c86b5a', '#7d6bb5', '#e9eef3'][(r + k) % 6] }, svg);
+      x += w + 2;
+    }
+  }
+  // framed world map poster, the channel's own subject
+  el('rect', { x: 470, y: 46, width: 330, height: 156, rx: 4, fill: '#2a3b4c' }, svg);
+  el('rect', { x: 480, y: 56, width: 310, height: 136, fill: '#d9ecf7' }, svg);
+  el('path', { d: 'M512 92 q20-18 52-10 q14 10 4 26 q-8 14-26 12 q-6 22-18 26 q-8-20-18-30 q-6-14 6-24z M566 140 q14-4 20 10 q6 22-8 36 q-12-10-14-24 q-4-14 2-22z M618 84 q24-14 50-4 q26-2 50 10 q22 6 26 24 q-10 10-30 6 q-6 18-24 20 q-18-8-26 4 q-14-2-16-18 q-10-6-20 2 q-12-8-12-22 q-10-10 2-22z M650 132 q14-2 18 12 q2 16-10 24 q-12-6-12-20z M722 152 q16-6 30 2 q4 14-12 18 q-16-2-18-20z', fill: '#e0a03c', stroke: '#c48a2e', 'stroke-width': 1 }, svg);
+  T(635, 216, 'PER CAPITA MAPS', { 'text-anchor': 'middle', 'font-size': 9, fill: '#5b6b7c', 'font-family': FONT, 'font-weight': 700, 'letter-spacing': 1.5 }, svg);
 
   // digital wall clock
   const clock = el('g', { transform: 'translate(960,70)' }, svg);
@@ -317,7 +313,7 @@ function create(svg, { crew, onSelect, tz = () => undefined, artBase = 'office/a
     else if (a.state === 'failed') { go(b, `seat-${id}`); b.queue.push({ do: 'wait', sec: Infinity, pose: 'broken' }); }
     else if (a.state === 'done' && handoff) {
       b.queue.push({ do: 'wait', sec: 2.2, pose: b.pose === 'type' ? 'sitIdle' : 'stand' });
-      if (id === 'scout') { b.queue.push({ do: 'item', kind: 'note' }); go(b, 'board'); b.queue.push({ do: 'wait', sec: 1.2, pose: 'reach' }, { do: 'item', kind: null }); }
+      if (id === 'scout') { b.queue.push({ do: 'item', kind: 'note' }); go(b, 'give-writer'); b.queue.push({ do: 'wait', sec: 1.2, pose: 'reach' }, { do: 'item', kind: null }); }
       else if (NEXT[id]) { b.queue.push({ do: 'item', kind: CARRY[id] }); go(b, `give-${NEXT[id]}`); b.queue.push({ do: 'wait', sec: 1.4, pose: 'reach' }, { do: 'item', kind: null }); }
       b.queue.push({ do: 'wander' });
     } else b.queue.push({ do: 'wander' });
@@ -554,26 +550,7 @@ function create(svg, { crew, onSelect, tz = () => undefined, artBase = 'office/a
     select(id) {
       selected = id;
       for (const k in bots) bots[k].ring.setAttribute('visibility', k === id ? 'visible' : 'hidden');
-    },
-    wall({ rows = [], eta = '', notes = [] }) {
-      rows.slice(0, 2).forEach((r, i) => {
-        tvRows[i].label.textContent = r.label;
-        tvRows[i].value.textContent = r.value;
-        tvRows[i].bar.setAttribute('width', Math.max(6, Math.min(1, r.share || 0) * 278).toFixed(1));
-      });
-      tvEta.textContent = eta.length > 44 ? `${eta.slice(0, 43)}…` : eta;
-      notesG.innerHTML = '';
-      notes.slice(0, 6).forEach((title, i) => {
-        const g = el('g', { transform: `translate(${594 + (i % 3) * 78},${70 + Math.floor(i / 3) * 56}) rotate(${(i * 37 % 7) - 3})` }, notesG);
-        el('rect', { width: 72, height: 48, fill: NOTE_COL[i], stroke: 'rgba(0,0,0,.08)' }, g);
-        // wrap to three short lines
-        const lines = []; let cur = '';
-        for (const w of String(title).split(/\s+/)) { if ((cur + ' ' + w).trim().length > 12 && cur) { lines.push(cur); cur = w; } else cur = (cur + ' ' + w).trim(); }
-        if (cur) lines.push(cur);
-        if (lines.length > 3) { lines.length = 3; lines[2] = `${lines[2].slice(0, 11)}…`; }
-        lines.forEach((l, j) => T(5, 13 + j * 12, l, { 'font-size': 10, fill: '#12263a', 'font-family': FONT, 'font-weight': 700 }, g));
-      });
-    },
+    }
   };
 }
 
