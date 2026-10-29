@@ -70,6 +70,10 @@ export const config = {
   instagramApiVersion: env.INSTAGRAM_API_VERSION || 'v23.0',
   instagramDelayHours: Number(env.INSTAGRAM_DELAY_HOURS ?? 24),
   whisperModel: env.WHISPER_MODEL || 'small.en',
+  // The "most people would guess X" beat right after the Map Reveal hook. Off since 29 Oct 2026:
+  // every scored video lost the most viewers there (0:04–0:07). GUESS_BEAT=on brings it back.
+  // Countdown keeps its guess: it comes later and drives the pinned "you" row under the ladder.
+  guessBeat: (env.GUESS_BEAT ?? 'off').toLowerCase() === 'on',
   // Weekly analytics JSON for Claude's review; keep off until the YouTube API audit is approved.
   analysisExport: (env.ANALYSIS_EXPORT ?? 'off').toLowerCase() === 'on',
   analysisExportToken: env.ANALYSIS_EXPORT_TOKEN ?? '',
