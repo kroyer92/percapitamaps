@@ -10,6 +10,7 @@ import { followup } from './discover.js';
 import { track } from './activity.js';
 import { fmtIn } from './lib/time.js';
 import { setTune } from './tune.js';
+import { videosOverview } from './analytics.js';
 
 const HELP = [
   '<b>Per Capita Maps Studio</b>',
@@ -18,6 +19,7 @@ const HELP = [
   '/link &lt;job&gt; &lt;url&gt; – connect an uploaded video to its job',
   '/followup &lt;job or video URL&gt; – queue 2 related videos for a winner',
   '/produce [n] – make n videos now (default 1)',
+  '/videos – every recent video, its link and its scorecards',
   '/tune [on|off|reset] – see or undo the weekly hook/length auto-tuning',
   '/status – queue, waiting approvals and next slots',
   '/help – this list',
@@ -82,6 +84,9 @@ async function onMessage(text: string): Promise<void> {
       await queueFollowup(id);
       return;
     }
+    case '/videos':
+      await say(await videosOverview());
+      return;
     case '/tune':
       await say(await setTune((args[0] ?? '').toLowerCase()));
       return;
@@ -129,6 +134,7 @@ export async function startBot(): Promise<void> {
       { command: 'produce', description: 'Make videos now: /produce 2' },
       { command: 'link', description: 'Connect an upload: /link 12 <url>' },
       { command: 'followup', description: 'Two related videos for a winner' },
+      { command: 'videos', description: 'Recent videos and their scorecards' },
       { command: 'tune', description: 'See or undo auto-tuning: /tune off' },
       { command: 'help', description: 'All commands' },
     ],

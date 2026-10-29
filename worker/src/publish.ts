@@ -90,7 +90,9 @@ export function parseVideoId(text: string): string | undefined {
 export async function linkVideo(id: number, videoId: string, url?: string): Promise<string> {
   const job = await one<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]);
   if (!job) return `No job #${id}.`;
-  const publishedAt = job.slot_at && +new Date(job.slot_at) > Date.now() - 6 * 3600_000 ? new Date(job.slot_at) : new Date();
+  // Uploads are scheduled for the pack's slot, so that is when it went live, also when an older
+  // video is linked days later (its 24h/72h/7d windows then line up with the real publish time).
+  const publishedAt = job.slot_at ? new Date(job.slot_at) : new Date();
   await q(
     `UPDATE jobs SET status = 'published', youtube_video_id = $2, youtube_url = $3, published_at = $4,
        ig_due_at = $4::timestamptz + make_interval(hours => $5), updated_at = now() WHERE id = $1`,
