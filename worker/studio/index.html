@@ -453,7 +453,7 @@ function paintTv(s) {
   else if (y.eta.date) est = `At the last 14 days' pace (${fmt(y.eta.views_per_day)} Shorts views and ${(y.eta.subs_per_day ?? 0).toFixed(1)} subscribers a day) you qualify around <b>${fmtDate(y.eta.date)}</b>${y.eta.rule === 'now' ? `, before the rules change on ${fmtDate(ch)}` : `, under the stricter rules that start on ${fmtDate(ch)}`}.`;
   else est = `At the last 14 days' pace (${fmt(y.eta.views_per_day)} Shorts views and ${(y.eta.subs_per_day ?? 0).toFixed(1)} subscribers a day) the channel doesn't get there within two years. Winners and follow-ups are what moves this.`;
   const src = y.source === 'youtube'
-    ? `From YouTube${y.fetched_at ? `, updated ${since(y.fetched_at)} ago` : ''}. Watch hours are long-form only.`
+    ? `From YouTube${y.fetched_at ? `, updated ${since(y.fetched_at)} ago` : ''}. Views are near real time; watch hours are long-form only and run 2–3 days behind Studio.`
     : 'Estimated from the tracked videos until WF5 fetches the channel totals.';
   $('tv').innerHTML = `
     <div class="h">Road to monetization (YouTube Partner Program)</div>
