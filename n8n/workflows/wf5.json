@@ -61,7 +61,7 @@
         80
       ],
       "parameters": {
-        "url": "=https://www.googleapis.com/youtube/v3/videos?part=statistics&id={{ $json.video_id }}",
+        "url": "=https://www.googleapis.com/youtube/v3/videos?part=statistics,snippet&id={{ $json.video_id }}",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "youTubeOAuth2Api",
         "options": {}

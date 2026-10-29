@@ -131,7 +131,7 @@ wfs.push(workflow('wf5', 'WF5 Analyze', [
   manual('wf5', [0, 180]),
   node('wf5', 'Videos due', 'n8n-nodes-base.httpRequest', 4.2, [240, 80], { url: `${W}/analytics/due`, options: {} }, { ...retry, alwaysOutputData: false }),
   node('wf5', 'Views and likes', 'n8n-nodes-base.httpRequest', 4.2, [480, 80], {
-    url: "=https://www.googleapis.com/youtube/v3/videos?part=statistics&id={{ $json.video_id }}",
+    url: "=https://www.googleapis.com/youtube/v3/videos?part=statistics,snippet&id={{ $json.video_id }}",
     authentication: 'predefinedCredentialType', nodeCredentialType: 'youTubeOAuth2Api', options: {},
   }, { ...retry, onError: 'continueRegularOutput' }),
   node('wf5', 'Retention', 'n8n-nodes-base.httpRequest', 4.2, [720, 80], {
