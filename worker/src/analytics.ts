@@ -21,21 +21,54 @@ const WINDOWS: { win: string; hours: number }[] = [
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
+// YouTube Analytics lags 2–3 days behind Studio, so a snapshot taken on time often has no engaged
+// views yet. Such a snapshot is fetched again every run until the data arrives (or RETRY_HOURS run
+// out). The report always ends on the window's own last day, so a late or backfilled "24h" still
+// measures day one, not everything up to today.
+const RETRY_HOURS = 96;
+
 export async function dueSnapshots() {
+  await nagUnlinked().catch((e) => console.error('[nag]', e.message));
   const jobs = await q<{ id: number; youtube_video_id: string; published_at: Date }>(
     `SELECT id, youtube_video_id, published_at FROM jobs WHERE youtube_video_id IS NOT NULL AND published_at IS NOT NULL AND published_at > now() - interval '30 days'`);
-  const have = new Set((await q<{ job_id: number; win: string }>('SELECT job_id, win FROM metrics')).map((m) => `${m.job_id}:${m.win}`));
+  const have = new Map((await q<{ job_id: number; win: string; ready: boolean; captured_at: Date }>(
+    'SELECT job_id, win, engaged_views IS NOT NULL AS ready, captured_at FROM metrics')).map((m) => [`${m.job_id}:${m.win}`, m]));
   const out: { job_id: number; video_id: string; win: string; start_date: string; end_date: string }[] = [];
   for (const j of jobs) {
+    const pub = +new Date(j.published_at);
     for (const w of WINDOWS) {
-      const at = +new Date(j.published_at) + w.hours * 3600_000;
-      if (at <= Date.now() && !have.has(`${j.id}:${w.win}`)) {
-        out.push({ job_id: j.id, video_id: j.youtube_video_id, win: w.win, start_date: ymd(new Date(j.published_at)), end_date: ymd(new Date()) });
+      const at = pub + w.hours * 3600_000;
+      if (at > Date.now()) break;
+      const m = have.get(`${j.id}:${w.win}`);
+      // 12 h past RETRY_HOURS leaves room for the final run that sends the scorecard anyway.
+      const retry = m && !m.ready && Date.now() < at + (RETRY_HOURS + 12) * 3600_000 && Date.now() - +new Date(m.captured_at) > 5 * 3600_000;
+      if (!m || retry) {
+        out.push({ job_id: j.id, video_id: j.youtube_video_id, win: w.win, start_date: ymd(new Date(pub)), end_date: ymd(new Date(Math.min(at, Date.now()))) });
         break; // one window per video per run; the next run catches up
       }
     }
   }
   return out.slice(0, 40);
+}
+
+// Approved videos whose slot has passed without a /link get no scorecard or Instagram post, so the
+// bot asks for the link: once a day, at most 3 times per video.
+async function nagUnlinked(): Promise<void> {
+  const rows = await q<{ id: number; title: string | null; slot_at: Date }>(
+    `SELECT id, packaging->>'title' AS title, slot_at FROM jobs
+     WHERE status = 'approved' AND youtube_video_id IS NULL AND slot_at < now() - interval '2 hours' AND slot_at > now() - interval '14 days'
+     ORDER BY slot_at`);
+  if (!rows.length) return;
+  const asked = (await getSetting<Record<string, { n: number; at: string }>>('link_nag')) ?? {};
+  const due = rows.filter((r) => (asked[r.id]?.n ?? 0) < 3 && Date.now() - +new Date(asked[r.id]?.at ?? 0) > 22 * 3600_000);
+  if (!due.length) return;
+  for (const r of due) asked[r.id] = { n: (asked[r.id]?.n ?? 0) + 1, at: new Date().toISOString() };
+  await setSetting('link_nag', asked);
+  await say([
+    `🔗 <b>${due.length === 1 ? 'One video has' : `${due.length} videos have`} no link yet</b>, so I can't score ${due.length === 1 ? 'it' : 'them'}:`,
+    ...due.map((r) => `#${r.id} ${esc(r.title ?? '')} (slot ${ymd(new Date(r.slot_at))}): <code>/link ${r.id} </code>+ its YouTube link`),
+    'Skipped one on purpose? Ignore this; I ask at most 3 times.',
+  ].join('\n'));
 }
 
 function analyticsRow(a: any): Record<string, number> {
@@ -49,6 +82,12 @@ export async function storeSnapshot(body: any): Promise<void> {
   const a = analyticsRow(body.analytics);
   const num = (v: any) => (v === undefined || v === null || isNaN(Number(v)) ? null : Number(v));
   const jobId = Number(body.job_id);
+  // videos.list statistics are lifetime totals; for a snapshot taken well after its window the
+  // Analytics row (which ends on the window's last day) is the honest number.
+  const pub = (await q<{ published_at: Date }>('SELECT published_at FROM jobs WHERE id = $1', [jobId]))[0]?.published_at;
+  const hours = WINDOWS.find((w) => w.win === body.win)?.hours ?? 0;
+  const late = !!pub && Date.now() > +new Date(pub) + (hours + 30) * 3600_000 && a.views !== undefined && !isNaN(a.views);
+  const life = (v: any) => (late ? null : num(v));
   office.working('analyst', `Reading the ${body.win} numbers for #${jobId}`, jobId);
   const ig = await igInsights(jobId);
   const curve = curveRows(body.curve);
@@ -60,20 +99,20 @@ export async function storeSnapshot(body: any): Promise<void> {
        comments = EXCLUDED.comments, subs_gained = EXCLUDED.subs_gained, raw = EXCLUDED.raw, curve = EXCLUDED.curve, ig = EXCLUDED.ig`,
     [
       jobId, body.win,
-      num(stats.viewCount) ?? num(a.views),
+      life(stats.viewCount) ?? num(a.views),
       num(a.engagedViews),
       num(a.averageViewPercentage),
       num(a.averageViewDuration),
-      num(stats.likeCount) ?? num(a.likes),
+      life(stats.likeCount) ?? num(a.likes),
       num(a.shares),
-      num(stats.commentCount) ?? num(a.comments),
+      life(stats.commentCount) ?? num(a.comments),
       num(a.subscribersGained),
       body,
       curve ? JSON.stringify(curve) : null,
       ig,
     ],
   );
-  await scoreAndTell(jobId, body.win);
+  await scoreAndTell(jobId, body.win, pub ? +new Date(pub) + (hours + RETRY_HOURS) * 3600_000 : 0, late);
 }
 
 // YouTube Analytics' audience retention report: rows of [elapsedVideoTimeRatio, audienceWatchRatio].
@@ -122,7 +161,7 @@ type JobInfo = { id: number; title: string | null; hook_type: string | null; scr
 
 // Scores a fresh snapshot against the bands and the channel's other videos, saves the verdict and
 // tells you in Telegram what to change. Winners get a follow-up button.
-async function scoreAndTell(jobId: number, win: string): Promise<void> {
+async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = false): Promise<void> {
   const job = (await q<JobInfo>(`SELECT id, packaging->>'title' AS title, hook_type, script, render, youtube_video_id FROM jobs WHERE id = $1`, [jobId]))[0];
   const snap = (await q<Snapshot>('SELECT * FROM metrics WHERE job_id = $1 AND win = $2', [jobId, win]))[0];
   if (!job || !snap) return;
@@ -133,18 +172,23 @@ async function scoreAndTell(jobId: number, win: string): Promise<void> {
   const sc = score(snap, video, peers);
   await q('UPDATE metrics SET score = $3 WHERE job_id = $1 AND win = $2', [jobId, win, sc]);
   const keyboard = sc.verdict === 'winner' ? [[{ text: '➕ Make 2 follow-ups', callback_data: `fu:${jobId}` }]] : undefined;
+  if (snap.engaged_views === null && Date.now() < retryUntil) {
+    // YouTube Analytics hasn't caught up yet; the next WF5 run fetches this window again.
+    office.finished('analyst', `#${jobId} at ${win}: waiting for YouTube Analytics to catch up`, jobId);
+    return;
+  }
   office.finished('analyst', `#${jobId} at ${win}: ${VERDICT[sc.verdict]}, ${sc.reason}`, jobId);
-  await say(scoreText(job, win, snap, sc), keyboard);
+  await say(scoreText(job, win, snap, sc, late), keyboard);
 }
 
 const VERDICT: Record<Score['verdict'], string> = { winner: '🏆 Winner', average: '🙂 Average', loser: '🔻 Loser', early: '⏳ Too early' };
 const g = (x?: Grade) => (x ? ` (${x})` : '');
 const n1 = (x?: number) => (x === undefined ? '–' : x >= 10 ? String(Math.round(x)) : x.toFixed(1));
 
-export function scoreText(job: Pick<JobInfo, 'id' | 'title' | 'youtube_video_id'>, win: string, s: Snapshot, sc: Score): string {
+export function scoreText(job: Pick<JobInfo, 'id' | 'title' | 'youtube_video_id'>, win: string, s: Snapshot, sc: Score, late = false): string {
   const v = sc.values;
   const lines = [
-    `📊 <b>#${job.id} · ${win}</b> · ${esc(job.title ?? '')}`,
+    `📊 <b>#${job.id} · ${win}</b>${late ? ' (caught up)' : ''} · ${esc(job.title ?? '')}`,
     `${VERDICT[sc.verdict]}: ${esc(sc.reason)}`,
     `<b>YouTube</b> ${(v.views ?? 0).toLocaleString('en-US')} views · stayed ${n1(v.stay)}%${g(sc.grades.stay)} · watched ${n1(v.finish)}%${g(sc.grades.finish)} · ${n1(v.shares)} shares/1k${g(sc.grades.shares)} · ${n1(v.subs)} subs/1k${g(sc.grades.subs)}`,
   ];
@@ -278,4 +322,25 @@ export async function storeChannel(body: any): Promise<void> {
 function analyticsRows(a: any): Record<string, string | number>[] {
   const headers: string[] = (a?.columnHeaders ?? []).map((h: any) => h.name);
   return (a?.rows ?? []).map((row: any[]) => Object.fromEntries(headers.map((h, i) => [h, row[i]])));
+}
+
+// /videos: every video of the last 30 days, whether it is linked, and each snapshot's verdict.
+export async function videosOverview(): Promise<string> {
+  const jobs = await q<{ id: number; title: string | null; status: string; slot_at: Date | null; published_at: Date | null; linked: boolean }>(
+    `SELECT id, packaging->>'title' AS title, status, slot_at, published_at, youtube_video_id IS NOT NULL AS linked FROM jobs
+     WHERE status IN ('approved','published') AND COALESCE(published_at, slot_at, created_at) > now() - interval '30 days'
+     ORDER BY COALESCE(published_at, slot_at, created_at)`);
+  if (!jobs.length) return 'No approved or published videos in the last 30 days.';
+  const snaps = await q<{ job_id: number; win: string; verdict: string | null; ready: boolean }>(
+    `SELECT job_id, win, score->>'verdict' AS verdict, engaged_views IS NOT NULL AS ready FROM metrics WHERE job_id = ANY($1)`, [jobs.map((j) => j.id)]);
+  const icon: Record<string, string> = { winner: '🏆', average: '🙂', loser: '🔻', early: '⏳' };
+  const cell = (id: number, win: string) => {
+    const m = snaps.find((x) => x.job_id === id && x.win === win);
+    return `${win} ${!m ? '–' : !m.ready && !m.verdict ? '…' : icon[m.verdict ?? ''] ?? '?'}`;
+  };
+  return [
+    '<b>Videos, last 30 days</b>',
+    ...jobs.map((j) => `#${j.id} ${esc((j.title ?? '').slice(0, 48))} · ${j.linked ? `${ymd(new Date(j.published_at!))} · ${WINDOWS.map((w) => cell(j.id, w.win)).join(' ')}` : `⚠️ not linked: <code>/link ${j.id} </code>+ link`}`),
+    '– not due yet · … waiting for YouTube Analytics (2–3 days behind)',
+  ].join('\n');
 }
