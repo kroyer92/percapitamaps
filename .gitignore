@@ -13,3 +13,6 @@ worker/bundle/
 worker/tmp-*
 *.log
 .DS_Store
+
+# Office art candidates (tools/office-art); only the picked PNGs go into worker/studio/office/art
+tools/office-art/out/

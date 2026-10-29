@@ -222,6 +222,8 @@ studio.get('/', (req, res, next) => {
   res.set('Cache-Control', 'no-store').sendFile(path.join(pageDir, 'index.html'), (e) => e && next(e));
 });
 studio.use('/fonts', express.static(fontDir, { maxAge: '30d', fallthrough: false }));
+// The office floor script and its art (generated on the PC GPU by tools/office-art; optional).
+studio.use('/office', express.static(path.join(pageDir, 'office'), { maxAge: '1h', fallthrough: false }));
 
 studio.get('/api/state', async (_req, res, next) => {
   try {
