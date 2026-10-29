@@ -1,0 +1,13 @@
+{
+  "name": "percapita-office-art",
+  "private": true,
+  "type": "module",
+  "description": "Renders the studio office's robots and furniture from three.js models to PNG sprites, on the GPU through headless Chromium",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.62.1",
+    "three": "0.180.0"
+  }
+}

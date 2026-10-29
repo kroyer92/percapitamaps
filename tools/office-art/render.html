@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<script type="importmap">{ "imports": { "three": "./node_modules/three/build/three.module.js", "three/addons/": "./node_modules/three/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import * as models from './models.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setClearColor(0x000000, 0);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight('#f4f8ff', '#8a6a50', 1.4));
+const key = new THREE.DirectionalLight('#fff4e0', 2.2); key.position.set(-3, 6, 5); scene.add(key);
+const rim = new THREE.DirectionalLight('#bfe0ff', 1.3); rim.position.set(4, 3, -4); scene.add(rim);
+
+// The office is drawn straight on with a slight look down, so the sprites are shot the same way.
+const VIEW = new THREE.Vector3(0.22, 0.42, 1).normalize();
+
+// Renders one model and returns a PNG data URL fitted inside maxW x maxH, bottom-aligned content.
+window.renderAsset = (name, maxW, maxH) => {
+  const obj = name in models.CREW ? models.robot(name) : models[name]();
+  scene.add(obj);
+  obj.updateMatrixWorld(true);
+  const bb = new THREE.Box3().setFromObject(obj);
+  const centre = name in models.CREW ? new THREE.Vector3(0, 1.05, 0) : bb.getCenter(new THREE.Vector3());
+  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+  cam.position.copy(centre).addScaledVector(VIEW, 20);
+  cam.lookAt(centre);
+  cam.updateMatrixWorld(true);
+  const inv = cam.matrixWorldInverse;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const x of [bb.min.x, bb.max.x]) for (const y of [bb.min.y, bb.max.y]) for (const z of [bb.min.z, bb.max.z]) {
+    const p = new THREE.Vector3(x, y, z).applyMatrix4(inv);
+    x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+  }
+  // Every robot gets the same frame, so the gear on top doesn't make one robot smaller than the rest.
+  if (name in models.CREW) { x0 = -0.82; x1 = 0.82; y0 = -0.92; y1 = 1.12; }
+  const pad = 0.02 * Math.max(x1 - x0, y1 - y0);
+  Object.assign(cam, { left: x0 - pad, right: x1 + pad, bottom: y0 - pad, top: y1 + pad });
+  cam.updateProjectionMatrix();
+  const aspect = (x1 - x0 + 2 * pad) / (y1 - y0 + 2 * pad);
+  const w = Math.round(Math.min(maxW, maxH * aspect)), h = Math.round(Math.min(maxH, maxW / aspect));
+  // Render at 3x, then scale down: smoother edges than antialiasing alone.
+  renderer.setPixelRatio(1);
+  renderer.setSize(w * 3, h * 3, false);
+  renderer.render(scene, cam);
+  const out = document.createElement('canvas'); out.width = w; out.height = h;
+  const ctx = out.getContext('2d'); ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(renderer.domElement, 0, 0, w, h);
+  scene.remove(obj);
+  return out.toDataURL('image/png');
+};
+window.rendererName = () => {
+  const gl = renderer.getContext(); const d = gl.getExtension('WEBGL_debug_renderer_info');
+  return d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+};
+window.ready = true;
+</script>

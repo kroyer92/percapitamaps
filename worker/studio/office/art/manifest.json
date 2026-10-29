@@ -1,0 +1,20 @@
+{
+  "robots": {
+    "scout": "robot-scout.png",
+    "writer": "robot-writer.png",
+    "narrator": "robot-narrator.png",
+    "editor": "robot-editor.png",
+    "checker": "robot-checker.png",
+    "publisher": "robot-publisher.png",
+    "analyst": "robot-analyst.png"
+  },
+  "props": {
+    "desk": "desk.png",
+    "coffee": "coffee.png",
+    "cooler": "cooler.png",
+    "rack": "rack.png",
+    "sofa": "sofa.png",
+    "plant": "plant.png",
+    "inbox": "inbox.png"
+  }
+}
