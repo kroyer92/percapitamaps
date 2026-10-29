@@ -1,7 +1,8 @@
 // The office floor on the studio page: one robot per agent, walking between desks, the coffee
 // machine and the sofa according to the live status from /studio/api/live. The motion is all
-// code; the art is either drawn here or, when office/art/manifest.json exists, the PNGs made on
-// the GPU with tools/office-art (robots, desk and props). Missing art falls back to the drawing.
+// code; the art is either drawn here or, when office/art/manifest.json exists, the PNGs rendered
+// from the three.js models in tools/office-art (robots, desk and props). Missing art falls back
+// to the drawing.
 'use strict';
 (() => {
 const NS = 'http://www.w3.org/2000/svg';
@@ -21,7 +22,7 @@ const CARRY = { writer: 'paper', narrator: 'tape', editor: 'film', checker: 'fil
 const BULB = { idle: '#9aa8b5', working: '#2fd38a', done: '#4fb3ff', waiting: '#f0b354', failed: '#ff5a45' };
 const FREE_SPOTS = ['coffee', 'coffee2', 'cooler', 'cooler2', 'sofa1', 'sofa2', 'window', 'shelf', 'poster', 'plant'];
 const GEAR = { scout: 'dish', writer: 'pencil', narrator: 'phones', editor: 'visor', checker: 'glasses', publisher: 'plane', analyst: 'chart' };
-// Where each piece of GPU art goes (x, y, width, height of its box; drawn bottom-centred).
+// Where each rendered picture goes (x, y, width, height of its box; drawn bottom-centred).
 const PROP_BOX = {
   coffee: [862, 196, 160, 104], cooler: [1080, 196, 44, 112], rack: [1128, 244, 64, 128],
   sofa: [912, 580, 196, 76], plant: [776, 600, 56, 84], inbox: [72, 500, 56, 82], desk: [-58, -50, 116, 56],
@@ -230,12 +231,12 @@ function create(svg, { crew, onSelect, tz = () => undefined, artBase = 'office/a
     const tilt = el('g', {}, body);
     const armL = el('g', {}, tilt);
     const drawn = el('g', {}, tilt);
-    const sprite = el('image', { x: -30, y: -84, width: 60, height: 76, preserveAspectRatio: 'xMidYMax meet', visibility: 'hidden' }, tilt);
+    const sprite = el('image', { x: -40, y: -100, width: 80, height: 93, preserveAspectRatio: 'xMidYMax meet', visibility: 'hidden' }, tilt);
     const armR = el('g', {}, tilt);
     // arms: a rounded limb for the drawn robot, a floating hand for the GPU sprite
     for (const [arm, x] of [[armL, -22], [armR, 15]]) {
       el('rect', { class: 'limb', x, y: -36, width: 7, height: 17, rx: 3.5, fill: c.color, stroke: 'rgba(0,0,0,.15)' }, arm);
-      el('circle', { class: 'hand', cx: x + 3.5, cy: -18, r: 5, fill: c.color, stroke: 'rgba(0,0,0,.25)', visibility: 'hidden' }, arm);
+      el('circle', { class: 'hand', cx: x < 0 ? x - 2 : x + 9, cy: -20, r: 5.5, fill: c.color, stroke: 'rgba(0,0,0,.25)', visibility: 'hidden' }, arm);
     }
     el('rect', { x: -16, y: -40, width: 32, height: 28, rx: 9, fill: c.color, stroke: 'rgba(0,0,0,.12)' }, drawn);
     el('rect', { x: -8, y: -33, width: 16, height: 9, rx: 2.5, fill: 'rgba(255,255,255,.4)' }, drawn);
@@ -270,7 +271,7 @@ function create(svg, { crew, onSelect, tz = () => undefined, artBase = 'office/a
     for (const n of [b.drawn, b.legs]) n.setAttribute('visibility', href ? 'hidden' : 'visible');
     b.g.querySelectorAll('.limb').forEach((n) => n.setAttribute('visibility', href ? 'hidden' : 'visible'));
     b.g.querySelectorAll('.hand').forEach((n) => n.setAttribute('visibility', href ? 'visible' : 'hidden'));
-    b.bulb.setAttribute('cy', href ? -90 : -75);
+    b.bulb.setAttribute('cy', href ? -104 : -75);
   }
 
   function setFace(b, mood) {
@@ -470,7 +471,7 @@ function create(svg, { crew, onSelect, tz = () => undefined, artBase = 'office/a
     paintScreen(c.id);
   });
 
-  // ---------- GPU art, when it has been generated ----------
+  // ---------- rendered art, when tools/office-art has made it ----------
   fetch(`${artBase}manifest.json`, { cache: 'no-cache' }).then((r) => r.ok ? r.json() : null).then((m) => {
     if (!m) return;
     art = { robots: m.robots || {}, props: m.props || {} };
@@ -480,6 +481,9 @@ function create(svg, { crew, onSelect, tz = () => undefined, artBase = 'office/a
       probe.onload = () => useArt(bots[id], url(art.robots[id]));
       probe.src = url(art.robots[id]);
     }
+    // The rack's lights blink on top of its picture, at the slots of the rendered model.
+    if (art.props.inbox) inboxFlag.setAttribute('visibility', 'hidden'); // the rendered mailbox has its own flag
+    if (art.props.rack) rackLights.forEach((l, i) => { l.setAttribute('cx', 1171); l.setAttribute('cy', 266 + i * 17.2); });
     for (const name in props) if (art.props[name]) {
       const probe = new Image();
       probe.onload = () => props[name].forEach(({ drawn, img }) => {

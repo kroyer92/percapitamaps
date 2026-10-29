@@ -69,8 +69,8 @@ they walk to their desk when their step starts, carry the script, voice and vide
 desk, wait at your inbox for your OK, and go for coffee when free, and monitors for video performance, earnings (locked until YPP) and the
 experiment lab. It is served by the render worker at `/studio/` (no extra container, about one
 database read every 30 seconds) and is read-only. Add `?demo` to the address to see it with
-example numbers and a video moving through the office. The robots are drawn in code; nicer
-art can be generated once on a PC GPU with `tools/office-art` (a Python script, see its README).
+example numbers and a video moving through the office. The robots and furniture are three.js
+models in `tools/office-art`, rendered to PNGs in `worker/studio/office/art` (see its README).
 
 Setup on the server, once:
 
