@@ -1,7 +1,7 @@
 // Planned scripts: the code decides the story (which country, which number, which visual in
 // each beat) and the language model only writes one spoken line per slot. A small local model
 // writes good single sentences but can't plan a story under many rules at once.
-import type { Format } from './config.js';
+import { config, type Format } from './config.js';
 import type { Facts, RankRow } from './facts.js';
 import { chatJson } from './llm.js';
 import { isBanned, numbersIn, wordCount, type Beat, type Script } from './validate.js';
@@ -25,7 +25,7 @@ const The = (name: string) => (THE.test(name) ? `The ${name}` : name);
 // One angle per contender, so the build-up lines don't all share one sentence pattern. Each video
 // starts at a different angle (see ctx.seed), so the #5 line isn't worded the same way every day.
 const ANGLES = [
-  'Open with the country name and say it is far above the guess, without repeating the guess number.',
+  'Open with the country name and say it is far above most of the world.',
   'Open with the number, then say which country it is.',
   'Say what makes this country a surprising place to rank this high, without inventing numbers.',
   'Say it is close to the top but still not number one.',
@@ -225,7 +225,7 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
   if (format === 'MAP_REVEAL') {
     return keep([
       hookSlot(c, 'map_fill'),
-      guessSlot(c, 5, (iso) => `zoom_to:${iso}`), // never a country the build-up names again
+      config.guessBeat ? guessSlot(c, 5, (iso) => `zoom_to:${iso}`) : undefined, // never a country the build-up names again
       medianSlot(c, 'map_fill'),
       ...contenderSlots(c, 5, (iso) => `highlight:${iso}`),
       revealSlot(c),
@@ -248,7 +248,7 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
         visual: 'map_fill',
         on_screen: `#${low[0].rank} to #${low.at(-1)!.rank}`,
       } as Slot : undefined,
-      guessSlot(c, 10, (iso) => `zoom_to:${iso}`), // gets a pinned row of its own under the ladder
+      config.guessBeat ? guessSlot(c, 10, (iso) => `zoom_to:${iso}`) : undefined, // gets a pinned row of its own under the ladder
       ...contenderSlots(c, 5, (iso) => `highlight:${iso}`),
       revealSlot(c),
       closerSlot(c, 'map_fill'),
