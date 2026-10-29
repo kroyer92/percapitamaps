@@ -85,6 +85,18 @@ export async function storeSnapshot(body: any): Promise<void> {
   // videos.list statistics are lifetime totals; for a snapshot taken well after its window the
   // Analytics row (which ends on the window's last day) is the honest number.
   const pub = (await q<{ published_at: Date }>('SELECT published_at FROM jobs WHERE id = $1', [jobId]))[0]?.published_at;
+  // YouTube's own publish time beats the slot or the moment of /link (videos linked days late got
+  // the link time). A wrong start shifts every window, so fix it and measure again from scratch.
+  const ytPub = body.stats?.items?.[0]?.snippet?.publishedAt;
+  if (ytPub && pub && Math.abs(+new Date(ytPub) - +new Date(pub)) > 3600_000) {
+    await q(
+      `UPDATE jobs SET published_at = $2,
+         ig_due_at = CASE WHEN ig_status IS NULL THEN $2::timestamptz + make_interval(hours => $3) ELSE ig_due_at END WHERE id = $1`,
+      [jobId, ytPub, config.instagramDelayHours]);
+    await q('DELETE FROM metrics WHERE job_id = $1', [jobId]);
+    office.finished('analyst', `#${jobId}: publish time corrected to ${ytPub}, measuring again`, jobId);
+    return;
+  }
   const hours = WINDOWS.find((w) => w.win === body.win)?.hours ?? 0;
   const late = !!pub && Date.now() > +new Date(pub) + (hours + 30) * 3600_000 && a.views !== undefined && !isNaN(a.views);
   const life = (v: any) => (late ? null : num(v));
