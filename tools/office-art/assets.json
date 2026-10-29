@@ -1,0 +1,22 @@
+{
+  "style": "flat vector game sprite, soft cel shading, clean thick dark outline, friendly cozy office game art, front view, full object visible, centered, plain pure white background, no shadow, no text, no watermark",
+  "robot": "cute small hover robot mascot, chibi proportions, rounded glossy {color} plastic body, big dark rounded screen face with two glowing mint green oval eyes and a small smile, short antenna on top, no arms, no legs, floats in the air, {gear}",
+  "assets": {
+    "scout":     { "kind": "robot", "color": "sky blue",          "gear": "a tiny satellite dish on its head",           "size": [832, 1024], "out": [192, 240] },
+    "writer":    { "kind": "robot", "color": "warm amber yellow", "gear": "a yellow pencil tucked behind its head",      "size": [832, 1024], "out": [192, 240] },
+    "narrator":  { "kind": "robot", "color": "sage green",        "gear": "big dark over-ear headphones",                "size": [832, 1024], "out": [192, 240] },
+    "editor":    { "kind": "robot", "color": "terracotta red",    "gear": "a dark visor band across the top of its head", "size": [832, 1024], "out": [192, 240] },
+    "checker":   { "kind": "robot", "color": "lavender purple",   "gear": "round golden glasses over its screen face",   "size": [832, 1024], "out": [192, 240] },
+    "publisher": { "kind": "robot", "color": "deep ocean blue",   "gear": "a white paper plane emblem on its chest",     "size": [832, 1024], "out": [192, 240] },
+    "analyst":   { "kind": "robot", "color": "slate grey blue",   "gear": "a small white bar chart emblem on its chest", "size": [832, 1024], "out": [192, 240] },
+
+    "desk":   { "kind": "prop", "prompt": "empty simple wooden office desk, warm brown wood, four short legs, nothing on top, no computer",            "size": [1216, 640],  "out": [290, 140] },
+    "coffee": { "kind": "prop", "prompt": "small office kitchen counter with grey cabinets, an espresso machine and a red toaster on top",           "size": [1216, 832],  "out": [400, 260] },
+    "cooler": { "kind": "prop", "prompt": "office water cooler with a light blue water bottle on top, white body",                                    "size": [640, 1408],  "out": [110, 280] },
+    "rack":   { "kind": "prop", "prompt": "small dark navy server rack cabinet with six slots and tiny status lights",                                  "size": [704, 1344],  "out": [160, 320] },
+    "sofa":   { "kind": "prop", "prompt": "cozy blue two-seat sofa with rounded armrests",                                                              "size": [1344, 576],  "out": [490, 190] },
+    "plant":  { "kind": "prop", "prompt": "potted leafy green office plant in a terracotta pot",                                                        "size": [768, 1152],  "out": [140, 210] },
+    "inbox":  { "kind": "prop", "prompt": "blue mailbox on a thin grey pole with a red flag",                                                           "size": [704, 1024],  "out": [140, 205] },
+    "window": { "kind": "view", "prompt": "flat vector illustration of a calm landscape seen through a window: rolling green hills, a small town, blue sky with soft clouds, no window frame, no text", "size": [1024, 1024], "out": [336, 336] }
+  }
+}

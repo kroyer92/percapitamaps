@@ -16,7 +16,6 @@
   --muted: #8fb3cc; --ink: #0f2a3d; --ink-2: #4d6577; --paper: #fbfcfd; --line: #e3eaef;
   --wall-1: #e6eef3; --wall-2: #d6e2ea; --trim: #b9c9d4; --wood-1: #b88c63; --wood-2: #ad8159;
   --desk: #5b3d26; --desk-2: #3f2a1a; --good: #2e7d4f; --bad: #b4482f; --warn: #c98a1c;
-  --skin-1: #f1c7a1; --skin-2: #c98f62; --skin-3: #8d5a3b;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { background: var(--wood-1); }
@@ -87,9 +86,8 @@ b, strong { font-weight: 700; }
 .crew-h .h { color: #fff; }
 .crew-h .q { font-size: 13px; opacity: .9; }
 .crew { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 14px; }
-.st { position: relative; display: flex; flex-direction: column; align-items: center; }
-.bubble { position: relative; width: 100%; min-height: 92px; background: #fff; border-radius: 10px; padding: 8px 10px 9px; font-size: 12.5px; line-height: 1.35; box-shadow: 0 4px 10px rgba(0,0,0,.18); margin-bottom: 10px; transition: background .3s; }
-.bubble::after { content: ""; position: absolute; left: 50%; bottom: -8px; margin-left: -8px; border: 8px solid transparent; border-bottom: 0; border-top-color: #fff; transition: border-color .3s; }
+.st { position: relative; display: flex; }
+.bubble { position: relative; width: 100%; height: 100%; min-height: 84px; background: #fff; border-radius: 10px; padding: 8px 10px 9px; font-size: 12.5px; line-height: 1.35; box-shadow: 0 4px 10px rgba(0,0,0,.18); transition: background .3s; }
 .bubble .who { display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 13px; margin-bottom: 3px; }
 .bubble .who i { width: 8px; height: 8px; border-radius: 50%; background: #9aa9b3; flex: none; }
 .bubble .who em { margin-left: auto; font-style: normal; font-weight: 600; font-size: 11px; color: var(--ink-2); }
@@ -98,65 +96,23 @@ b, strong { font-weight: 700; }
 .bubble .pbar { height: 5px; background: #e6edf2; border-radius: 99px; overflow: hidden; margin-top: 6px; }
 .bubble .pbar i { display: block; height: 100%; background: var(--blue); transition: width .8s linear; }
 .st[data-state=idle] .bubble { background: rgba(255,255,255,.72); }
-.st[data-state=idle] .bubble::after { border-top-color: rgba(255,255,255,.72); }
 .st[data-state=idle] .bubble .txt { color: var(--ink-2); }
 .st[data-state=working] .bubble .who i { background: #2fb36b; animation: pulse 1.2s infinite; }
 .st[data-state=waiting] .bubble { background: #fde9c4; }
-.st[data-state=waiting] .bubble::after { border-top-color: #fde9c4; }
 .st[data-state=waiting] .bubble .who i { background: var(--amber); animation: pulse 1.2s infinite; }
 .st[data-state=done] .bubble .who i { background: var(--good); }
 .st[data-state=failed] .bubble { background: #fbe1da; }
-.st[data-state=failed] .bubble::after { border-top-color: #fbe1da; }
 .st[data-state=failed] .bubble .who i { background: var(--bad); }
-.desk-svg { width: 100%; height: auto; display: block; overflow: visible; }
-.role { margin-top: 6px; font-size: 11px; color: #fff; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; opacity: .92; text-shadow: 0 1px 2px rgba(0,0,0,.3); text-align: center; }
-
-/* character animation, driven by data-state on .st */
-.st svg * { transform-box: fill-box; }
-.char { transform-origin: 50% 100%; transition: transform .6s ease; }
-.head { transform-origin: 50% 90%; transition: transform .6s ease; }
-.fore { transform-origin: 0% 50%; }
-.st[data-state=idle] .char { transform: rotate(-5deg) translateX(-3px); }
-.st[data-state=idle] .head { animation: breathe 4s ease-in-out infinite; }
-.st[data-state=idle] .arm-r, .st[data-state=idle] .arm-l { transform: translateY(10px); opacity: 0; }
-.st[data-state=idle] .mug-hand { opacity: 1; animation: sip 7s ease-in-out infinite; }
-.st[data-state=idle] .steam { opacity: 1; }
-.mug-hand { opacity: 0; transform-origin: 0% 0%; }
-.steam { opacity: 0; }
-.steam path { animation: steam 2.4s ease-in-out infinite; }
-.steam path:nth-child(2) { animation-delay: 1.2s; }
-.st[data-state=working] .fore-r { animation: typeR .22s ease-in-out infinite alternate; }
-.st[data-state=working] .fore-l { animation: typeL .26s ease-in-out infinite alternate; }
-.st[data-state=working] .head { animation: nod 1.8s ease-in-out infinite; }
-.st[data-state=waiting] .head { animation: look 3s ease-in-out infinite; }
-.st[data-state=waiting] .fore-r { transform: rotate(-35deg); }
-.st[data-state=waiting] .phone { opacity: 1; }
-.phone { opacity: 0; transition: opacity .3s; }
-.st[data-state=done] .fore-r { transform: rotate(-70deg); }
-.st[data-state=done] .badge-ok { opacity: 1; transform: scale(1); }
-.st[data-state=failed] .head { transform: rotate(18deg) translate(4px, 6px); }
-.st[data-state=failed] .badge-bad { opacity: 1; transform: scale(1); }
-.badge-ok, .badge-bad { opacity: 0; transform: scale(.3); transform-origin: 50% 50%; transition: all .35s cubic-bezier(.3,1.6,.5,1); }
-.scr-off { transition: opacity .4s; }
-.scr-on { opacity: 0; transition: opacity .4s; }
-.st[data-state=working] .scr-on, .st[data-state=waiting] .scr-on { opacity: 1; }
-.st[data-state=working] .scr-off, .st[data-state=waiting] .scr-off { opacity: 0; }
-.codelines { animation: scroll 2.6s linear infinite; }
-.zz { opacity: 0; }
-.st[data-state=idle][data-sleepy] .zz { opacity: 1; }
-.zz text { animation: zz 3s ease-in-out infinite; }
-.zz text:nth-child(2) { animation-delay: 1s; }
+/* ---------- the office floor (office/office.js) ---------- */
+.office { margin: 0 auto 16px; max-width: 1320px; border-radius: 14px; overflow: hidden; box-shadow: 0 10px 24px rgba(0,0,0,.28); background: #2a1d14; }
+.office-scroll { overflow-x: auto; }
+.office svg { display: block; width: 100%; min-width: 820px; height: auto; user-select: none; }
+.office .robot { cursor: pointer; outline: none; }
+.st { cursor: pointer; }
+.st:focus-visible .bubble { outline: 3px solid var(--amber); outline-offset: 2px; }
+.st.sel .bubble { box-shadow: 0 0 0 3px var(--amber), 0 4px 10px rgba(0,0,0,.18); }
 
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(47,179,107,.55); } 50% { box-shadow: 0 0 0 5px rgba(47,179,107,0); } }
-@keyframes breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1.5px); } }
-@keyframes typeR { from { transform: rotate(-6deg); } to { transform: rotate(6deg); } }
-@keyframes typeL { from { transform: rotate(5deg); } to { transform: rotate(-5deg); } }
-@keyframes nod { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(4deg); } }
-@keyframes look { 0%, 40%, 100% { transform: rotate(0); } 60%, 80% { transform: rotate(-10deg); } }
-@keyframes sip { 0%, 70%, 100% { transform: translateY(0) rotate(0); } 80%, 90% { transform: translateY(-14px) rotate(-25deg); } }
-@keyframes steam { 0% { opacity: 0; transform: translateY(4px); } 40% { opacity: .8; } 100% { opacity: 0; transform: translateY(-10px); } }
-@keyframes scroll { from { transform: translateY(0); } to { transform: translateY(-24px); } }
-@keyframes zz { 0% { opacity: 0; transform: translate(0, 0); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(8px, -14px); } }
 @keyframes settle { from { opacity: 0; transform: translateY(-6px) rotate(-2deg); } }
 @keyframes flash { 0% { box-shadow: 0 0 0 0 rgba(240,176,74,.9); } 100% { box-shadow: 0 0 0 12px rgba(240,176,74,0); } }
 .flash { animation: flash .9s ease-out; }
@@ -270,7 +226,8 @@ td.t a:hover { text-decoration: underline; }
 
 <div class="floor">
   <div class="inner">
-    <div class="crew-h"><span class="h">The crew</span><span class="q" id="queue"></span></div>
+    <div class="crew-h"><span class="h">The office</span><span class="q" id="queue"></span></div>
+    <div class="office"><div class="office-scroll"><svg id="office" role="img" aria-label="The office: one robot per agent, walking between desks as the pipeline works"></svg></div></div>
     <div class="crew" id="crew"></div>
 
     <div class="mons">
@@ -287,6 +244,7 @@ td.t a:hover { text-decoration: underline; }
 </div>
 <div class="err" id="err"></div>
 
+<script src="office/office.js"></script>
 <script>
 'use strict';
 const DEMO = new URLSearchParams(location.search).has('demo');
@@ -296,96 +254,45 @@ const fmt = (n) => n == null ? '–' : n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e7 
 const pct = (x) => x == null ? '–' : `${Math.round(x)}%`;
 let TZ = 'Europe/Copenhagen';
 
-// ---------- the crew: who sits where, how they look ----------
+// ---------- the crew: one robot each in the office (office/office.js) ----------
 const CREW = [
-  { id: 'scout', role: 'Finds topics', shirt: '#4f98c6', skin: 'var(--skin-1)', hair: '#3b2a1e', style: 'cap', prop: 'globe' },
-  { id: 'writer', role: 'Writes the script', shirt: '#e0a03c', skin: 'var(--skin-2)', hair: '#1c1c1c', style: 'bun', prop: 'notes' },
-  { id: 'narrator', role: 'Records the voice', shirt: '#6f9f80', skin: 'var(--skin-3)', hair: '#151515', style: 'short', prop: 'mic' },
-  { id: 'editor', role: 'Renders the video', shirt: '#c86b5a', skin: 'var(--skin-1)', hair: '#a5552a', style: 'long', prop: 'clapper' },
-  { id: 'checker', role: 'Quality checks', shirt: '#7d6bb5', skin: 'var(--skin-2)', hair: '#5a4632', style: 'glasses', prop: 'clipboard' },
-  { id: 'publisher', role: 'Ships & cross-posts', shirt: '#2f78a6', skin: 'var(--skin-3)', hair: '#2b1d14', style: 'curly', prop: 'plane' },
-  { id: 'analyst', role: 'Scores the numbers', shirt: '#4d6577', skin: 'var(--skin-1)', hair: '#d8c08a', style: 'side', prop: 'chart' },
+  { id: 'scout', role: 'Finds topics', color: '#4f98c6' },
+  { id: 'writer', role: 'Writes the script', color: '#e0a03c' },
+  { id: 'narrator', role: 'Records the voice', color: '#6f9f80' },
+  { id: 'editor', role: 'Renders the video', color: '#c86b5a' },
+  { id: 'checker', role: 'Quality checks', color: '#7d6bb5' },
+  { id: 'publisher', role: 'Ships & cross-posts', color: '#2f78a6' },
+  { id: 'analyst', role: 'Scores the numbers', color: '#4d6577' },
 ];
 const NAMES = { scout: 'Scout', writer: 'Writer', narrator: 'Narrator', editor: 'Editor', checker: 'Checker', publisher: 'Publisher', analyst: 'Analyst' };
-const COLOR = Object.fromEntries(CREW.map((c) => [c.id, c.shirt]));
-
-function hairSvg(c) {
-  const h = c.hair;
-  switch (c.style) {
-    case 'cap': return `<path d="M62 50 q16-20 34 -2 l8 4 q-2 4 -8 3 z" fill="${c.shirt}"/><path d="M62 52 q14-8 34 0" stroke="#0f2a3d" stroke-opacity=".25" fill="none"/>`;
-    case 'bun': return `<circle cx="70" cy="40" r="7" fill="${h}"/><path d="M62 56 q2-16 18 -14 q12 2 14 12 q-10-6 -32 2z" fill="${h}"/>`;
-    case 'short': return `<path d="M62 54 q0-14 16 -14 q16 0 16 12 q-12-4 -32 2z" fill="${h}"/>`;
-    case 'long': return `<path d="M60 76 q-4-34 18 -36 q18 0 16 14 q-10-6 -22 -2 q-6 10 -4 26z" fill="${h}"/>`;
-    case 'glasses': return `<path d="M62 54 q0-14 16 -14 q16 0 16 12 q-12-4 -32 2z" fill="${h}"/><circle cx="88" cy="58" r="4.5" fill="none" stroke="#1c1c1c" stroke-width="1.6"/><path d="M83.5 58 h-8" stroke="#1c1c1c" stroke-width="1.6"/>`;
-    case 'curly': return `<g fill="${h}"><circle cx="66" cy="50" r="6"/><circle cx="74" cy="44" r="6"/><circle cx="83" cy="43" r="6"/><circle cx="91" cy="48" r="5"/><circle cx="64" cy="58" r="5"/></g>`;
-    default: return `<path d="M62 56 q-2-16 16 -16 q18 0 16 10 l-20 -2 q-6 2 -12 8z" fill="${h}"/>`;
-  }
-}
-
-function propSvg(kind) {
-  switch (kind) {
-    case 'globe': return `<g transform="translate(26 92)"><circle r="11" cx="11" cy="11" fill="#6fb3e0"/><path d="M4 7 q5 2 6 -2 q4 3 8 1 M3 14 q6 -1 7 4 q4 -3 9 -1" stroke="#2e7d4f" stroke-width="2.4" fill="none"/><rect x="8" y="22" width="6" height="4" fill="#3f2a1a"/></g>`;
-    case 'notes': return `<g transform="translate(22 104) rotate(-8)"><rect width="22" height="16" rx="1.5" fill="#fff3c9"/><path d="M4 5 h14 M4 9 h12 M4 13 h9" stroke="#b48c3a" stroke-width="1.3"/></g><path d="M48 116 l14 -8" stroke="#f0b04a" stroke-width="3" stroke-linecap="round"/>`;
-    case 'mic': return `<g transform="translate(28 84)"><rect x="4" width="10" height="16" rx="5" fill="#2a2a2a"/><path d="M1 10 q8 10 16 0" stroke="#2a2a2a" stroke-width="2" fill="none"/><path d="M9 20 v12 M3 32 h12" stroke="#2a2a2a" stroke-width="2.4"/></g>`;
-    case 'clapper': return `<g transform="translate(22 100)"><rect y="6" width="24" height="14" rx="1.5" fill="#1c1c1c"/><path d="M0 6 l23 -6 l1 4 l-23 6z" fill="#fff"/><path d="M5 5 l3 -1 M11 3 l3 -1 M17 2 l3 -1" stroke="#1c1c1c" stroke-width="2"/></g>`;
-    case 'clipboard': return `<g transform="translate(24 96)"><rect width="20" height="24" rx="2" fill="#a77b4f"/><rect x="2.5" y="4" width="15" height="18" fill="#fff"/><path d="M5 9 l2 2 l4 -4 M5 15 l2 2 l4 -4" stroke="#2e7d4f" stroke-width="1.6" fill="none"/><rect x="6" y="-2" width="8" height="5" rx="1.5" fill="#56646e"/></g>`;
-    case 'plane': return `<g transform="translate(20 100)"><path d="M0 12 l26 -10 l-8 18 l-5 -6z" fill="#fff" stroke="#9fb6c6"/><path d="M13 14 l13 -12" stroke="#9fb6c6"/></g>`;
-    case 'chart': return `<g transform="translate(22 96)"><rect width="24" height="22" rx="2" fill="#fff"/><rect x="4" y="12" width="4" height="7" fill="#6fb3e0"/><rect x="10" y="8" width="4" height="11" fill="#6fb3e0"/><rect x="16" y="4" width="4" height="15" fill="#f0b04a"/></g>`;
-  }
-  return '';
-}
-
-function deskSvg(c) {
-  // 200 x 170: chair, character facing the monitor, desk in front, prop on the left of the desk.
-  return `<svg class="desk-svg" viewBox="0 0 200 172" aria-hidden="true">
-    <ellipse cx="100" cy="166" rx="86" ry="6" fill="#000" opacity=".14"/>
-    <rect x="44" y="70" width="14" height="52" rx="6" fill="#2d3a44"/>
-    <g class="zz" fill="#fff" font-weight="800" font-family="Inter,sans-serif"><text x="96" y="34" font-size="12">z</text><text x="104" y="24" font-size="9">z</text></g>
-    <g class="char">
-      <path d="M56 124 q-2-40 22 -42 q24 0 24 40z" fill="${c.shirt}"/>
-      <g class="head">
-        <rect x="74" y="72" width="9" height="10" fill="${c.skin}"/>
-        <circle cx="79" cy="58" r="16" fill="${c.skin}"/>
-        <circle cx="89" cy="57" r="1.8" fill="#1c1c1c"/>
-        <path d="M86 66 q3 2 6 0" stroke="#1c1c1c" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-        ${hairSvg(c)}
-      </g>
-      <g class="arm-l"><path d="M78 92 l10 16" stroke="${c.shirt}" stroke-width="8" stroke-linecap="round" filter="brightness(.85)"/><g class="fore fore-l"><path d="M88 108 l20 3" stroke="${c.skin}" stroke-width="6" stroke-linecap="round"/></g></g>
-      <g class="arm-r"><path d="M86 90 l12 16" stroke="${c.shirt}" stroke-width="8" stroke-linecap="round"/><g class="fore fore-r"><path d="M98 106 l22 2" stroke="${c.skin}" stroke-width="6" stroke-linecap="round"/><g class="phone"><rect x="114" y="96" width="8" height="14" rx="2" fill="#1c1c1c"/><rect x="115.5" y="98" width="5" height="9" fill="#6fb3e0"/></g></g></g>
-      <g class="mug-hand"><path d="M86 96 q6 14 10 18" stroke="${c.skin}" stroke-width="6" stroke-linecap="round" fill="none"/></g>
-    </g>
-    <g class="steam" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" opacity=".8"><path d="M100 104 q-3 -4 0 -8"/><path d="M105 104 q-3 -4 0 -8"/></g>
-    <rect x="96" y="108" width="12" height="11" rx="2" fill="#f4f7f9"/><path d="M108 111 q5 2 0 6" stroke="#f4f7f9" stroke-width="2" fill="none"/>
-    <rect x="132" y="104" width="6" height="16" fill="#2a2a2a"/>
-    <rect x="120" y="116" width="30" height="4" rx="1" fill="#2a2a2a"/>
-    <rect x="118" y="56" width="64" height="50" rx="4" fill="#1a1a1a"/>
-    <g>
-      <rect class="scr-off" x="122" y="60" width="56" height="42" rx="1.5" fill="#20323f"/>
-      <text class="scr-off" x="150" y="85" text-anchor="middle" font-size="8" font-weight="800" fill="#3e5a6e" font-family="Inter,sans-serif">PCM</text>
-      <g class="scr-on">
-        <rect x="122" y="60" width="56" height="42" rx="1.5" fill="#0f2a3d"/>
-        <clipPath id="clip-${c.id}"><rect x="122" y="60" width="56" height="42"/></clipPath>
-        <g clip-path="url(#clip-${c.id})"><g class="codelines">${Array.from({ length: 10 }, (_, i) => `<rect x="${126 + (i % 3) * 4}" y="${64 + i * 6}" width="${18 + ((i * 37) % 26)}" height="2.6" rx="1.3" fill="${i % 4 === 1 ? '#f0b04a' : '#6fb3e0'}" opacity="${i % 4 === 1 ? 1 : .75}"/>`).join('')}</g></g>
-      </g>
-    </g>
-    <rect x="10" y="120" width="180" height="10" rx="2" fill="#5b3d26"/>
-    <rect x="10" y="130" width="180" height="4" fill="#3f2a1a"/>
-    <rect x="18" y="134" width="8" height="30" fill="#3f2a1a"/><rect x="174" y="134" width="8" height="30" fill="#3f2a1a"/>
-    <rect x="58" y="134" width="40" height="30" fill="#4a3220" opacity=".55"/>
-    ${propSvg(c.prop)}
-    <g class="badge-ok"><circle cx="168" cy="52" r="10" fill="#2e7d4f"/><path d="M163 52 l3.5 3.5 l6.5 -7" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round"/></g>
-    <g class="badge-bad"><circle cx="168" cy="52" r="10" fill="#b4482f"/><path d="M168 46 v7 M168 57 v.5" stroke="#fff" stroke-width="2.8" stroke-linecap="round"/></g>
-  </svg>`;
-}
+const COLOR = Object.fromEntries(CREW.map((c) => [c.id, c.color]));
+let office;
+let selected = 'editor';
 
 const agents = {};
 function buildCrew() {
   $('crew').innerHTML = CREW.map((c) => `
-    <div class="st" id="st-${c.id}" data-state="idle">
+    <div class="st" id="st-${c.id}" data-state="idle" tabindex="0" role="button" aria-label="${NAMES[c.id]}: show in the office">
       <div class="bubble"><div class="who"><i></i>${NAMES[c.id]}<em></em></div><div class="txt">Free</div><div class="sub"></div></div>
-      ${deskSvg(c)}
-      <div class="role">${esc(c.role)}</div>
     </div>`).join('');
+  CREW.forEach((c) => {
+    const st = $(`st-${c.id}`);
+    st.addEventListener('click', () => select(c.id));
+    st.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(c.id); } });
+  });
+  office = window.StudioOffice?.create($('office'), {
+    crew: CREW.map((c) => ({ id: c.id, name: NAMES[c.id], role: c.role, color: c.color })),
+    tz: () => TZ,
+    onSelect: select,
+  });
+  select(selected);
+}
+
+// Clicking a robot or its card highlights both.
+function select(id) {
+  selected = id;
+  CREW.forEach((c) => $(`st-${c.id}`)?.classList.toggle('sel', c.id === id));
+  office?.select(id);
 }
 
 const since = (iso) => {
@@ -408,6 +315,7 @@ function paintAgent(a) {
   }
   el.querySelector('.txt').textContent = a.text || '';
   el.querySelector('.who em').textContent = a.job ? `#${a.job}` : '';
+  office?.agent(a);
   tickAgent(a);
 }
 
@@ -423,8 +331,6 @@ function tickAgent(a) {
   let html = parts.map((p) => `<span>${esc(p)}</span>`).join('');
   if (a.progress != null && a.state === 'working') html += `<span>${Math.round(a.progress * 100)}%</span><div class="pbar" style="flex-basis:100%"><i style="width:${(a.progress * 100).toFixed(1)}%"></i></div>`;
   el.querySelector('.sub').innerHTML = html;
-  // Free for more than 30 minutes: dozing.
-  if (a.state === 'idle' && Date.now() - new Date(a.since) > 30 * 60_000) el.dataset.sleepy = ''; else delete el.dataset.sleepy;
 }
 
 const logLines = [];
@@ -584,6 +490,7 @@ function connect() {
 function tick() {
   $('now').textContent = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
   Object.values(agents).forEach(tickAgent);
+  Object.values(agents).forEach((a) => office?.agent(a)); // progress and token counts change in place
   if (state) paintClock(state);
 }
 

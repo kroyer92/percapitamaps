@@ -5,6 +5,7 @@ exclude:
   - n8n
   - sql
   - music
+  - tools
   - compose.pipeline.yml
   - README.md
   - .gitignore

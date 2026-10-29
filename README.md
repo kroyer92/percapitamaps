@@ -63,12 +63,14 @@ our own scripts and trend headlines go to these models, never YouTube API data.
 ## Studio page
 
 An office you can open in the browser: a wall TV with the road to YPP and the qualifying date at
-the current pace, a whiteboard of the next videos and why each was picked, seven desks where the
-crew (Scout, Writer, Narrator, Editor, Checker, Publisher, Analyst) visibly work on the current
-job in real time, and monitors for video performance, earnings (locked until YPP) and the
+the current pace, a whiteboard of the next videos and why each was picked, an office floor
+where the crew (Scout, Writer, Narrator, Editor, Checker, Publisher, Analyst) are small robots:
+they walk to their desk when their step starts, carry the script, voice and video to the next
+desk, wait at your inbox for your OK, and go for coffee when free, and monitors for video performance, earnings (locked until YPP) and the
 experiment lab. It is served by the render worker at `/studio/` (no extra container, about one
 database read every 30 seconds) and is read-only. Add `?demo` to the address to see it with
-example numbers and a video moving through the office.
+example numbers and a video moving through the office. The robots are drawn in code; nicer
+art can be generated once on a PC GPU with `tools/office-art` (a Python script, see its README).
 
 Setup on the server, once:
 
