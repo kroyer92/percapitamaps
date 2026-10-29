@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, FORMAT_NAMES, type Format } from './config.js';
 import { one, q, getSetting, setSetting } from './db.js';
-import { buildDescription, seriesTitle } from './content.js';
+import { buildDescription, hideAnswer, seriesTitle } from './content.js';
 import { esc, say } from './telegram.js';
 import { fmtIn, upcomingSlots } from './lib/time.js';
 import type { JobRow } from './produce.js';
@@ -34,6 +34,9 @@ export async function approve(id: number): Promise<void> {
   const series = config.seriesNaming
     ? ((await one<{ n: number }>(`SELECT count(*)::int AS n FROM jobs WHERE format = $1 AND series_no IS NOT NULL`, [job.format]))?.n ?? 0) + 1
     : null;
+  // Jobs written before the packaging check existed can still name the answer.
+  const topic = await one<{ question: string }>('SELECT question FROM topics WHERE id = $1', [job.topic_id]);
+  hideAnswer(job.packaging, job.facts, job.format, topic?.question ?? job.facts.title);
   const title = seriesTitle(job.packaging.title, job.format, series ?? undefined);
   const description = buildDescription(job.packaging, job.facts, job.render?.music?.credit);
   const packaging = { ...job.packaging, title, description };

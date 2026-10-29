@@ -85,6 +85,33 @@ function usePlainLines(critic: Critic, script: Script, slots: Slot[], pk: Packag
   critic.fix_hint = `Plain lines used for ${all ? 'every beat' : `beat ${beats.join(', ')}`} after the critic failed twice.`;
 }
 
+// The #1 country is the payoff of every format except SCALE, so it (or its number) must never be in
+// the title, description, tags or pinned comment: job #35's description opened "Romania ranks first".
+export function spoilerFor(facts: Facts, format: Format): Spoiler | undefined {
+  const top = facts.ranking[0];
+  return format !== 'SCALE' && top ? { name: top.name, value: top.display, iso3: top.iso3, unit: facts.unit } : undefined;
+}
+
+// Swaps any packaging field that gives the answer away for a safe line built in code. Returns the
+// fields it changed, so the caller can log them.
+export function hideAnswer(pk: Packaging, facts: Facts, format: Format, question: string): string[] {
+  const sp = spoilerFor(facts, format);
+  if (!sp) return [];
+  const fixed: string[] = [];
+  const swap = <K extends 'title' | 'summary' | 'pinned_comment' | 'ig_caption'>(k: K, safe: string) => {
+    if (spoils(String(pk[k] ?? ''), sp)) { pk[k] = safe; fixed.push(k); }
+  };
+  swap('title', question.slice(0, 70));
+  swap('summary', `Make your guess before the reveal: ${facts.countries_count} countries ranked, and #1 comes last.`);
+  swap('pinned_comment', 'What was your guess before the reveal, and where does your country rank?');
+  swap('ig_caption', `${question}\nGuess before the reveal.`);
+  for (const k of ['search_tags', 'hashtags', 'ig_hashtags'] as const) {
+    const kept = (pk[k] ?? []).filter((t) => !spoils(t.replace(/^#/, ''), sp) && !t.toLowerCase().includes(sp.name.toLowerCase().replace(/\s+/g, '')));
+    if (kept.length !== (pk[k] ?? []).length) { pk[k] = kept; fixed.push(k); }
+  }
+  return fixed;
+}
+
 export function buildDescription(p: Packaging, facts: Facts, musicCredit?: string): string {
   return [
     p.summary,
@@ -129,14 +156,13 @@ export async function generateContent(opts: {
   const allowed = allowedNumbers(llmFacts, question);
   const words = wordsFor(opts.lengthBand);
   // SCALE has no single winner to hide.
-  const top = facts.ranking[0];
   // Ranks 2-6 first, then the anchor countries (e.g. USA, UK), all straight from FACTS.
   const anchors = new Set(Object.keys(facts.anchors));
   const fillers: Filler[] = format === 'SCALE' ? [] : [
     ...facts.ranking.slice(1, 6),
     ...facts.ranking.filter((r) => anchors.has(r.iso3) && r.rank > 6),
   ].map((r) => ({ name: r.name, iso3: r.iso3, display: r.display, rank: r.rank }));
-  const spoiler: Spoiler | undefined = format !== 'SCALE' && top ? { name: top.name, value: top.display, iso3: top.iso3, unit: facts.unit } : undefined;
+  const spoiler = spoilerFor(facts, format);
 
   let fixHint: string | undefined;
   for (let round = 0; round < 2; round++) {
@@ -168,7 +194,7 @@ export async function generateContent(opts: {
     if (wordCount(question) <= 9) script.beats[0].on_screen = question;
 
     onStep('Writing the title and description');
-    const pk = await chatJson<Packaging>({ temperature: 0.6, system, user: P.packagingUser(question, script.beats[0].vo, facts.source_line) });
+    const pk = await chatJson<Packaging>({ temperature: 0.6, system, user: P.packagingUser(question, script.beats[0].vo, facts.source_line, spoiler) });
     pk.title = (pk.title ?? question).replace(/#\S+/g, '').trim().slice(0, 70);
     pk.title = pk.title.replace(/^(\p{Ll})/u, (c) => c.toUpperCase());
     pk.hashtags = (pk.hashtags ?? ['#shorts', '#maps', '#geography']).slice(0, 3);
@@ -177,6 +203,8 @@ export async function generateContent(opts: {
     // A title or summary with a number that isn't in the facts falls back to the question.
     if (checkText('title', pk.title, allowed).length) pk.title = question.slice(0, 70);
     if (!pk.summary || checkText('summary', pk.summary, allowed).length) pk.summary = question;
+    const hidden = hideAnswer(pk, facts, format, question);
+    if (hidden.length) onStep(`Packaging named the answer; replaced: ${hidden.join(', ')}`);
 
     onStep('Fact-checking');
     const critic = await chatJson<Critic>({ temperature: 0.1, system, user: P.criticUser(JSON.stringify(script.beats), JSON.stringify(pk)) });

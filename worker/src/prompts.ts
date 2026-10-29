@@ -86,15 +86,18 @@ Return JSON only:
 {"hooks":[{"type":"CONTRADICTION","text":"..."},{"type":"DIRECT_QUESTION","text":"..."},{"type":"RANK_TEASE","text":"..."},{"type":"YOU","text":"..."},{"type":"STAKES","text":"..."}],"test_first":1,"reason":"..."}`;
 }
 
-export function packagingUser(question: string, hook: string, sourceLine: string): string {
-  return `TASK: write the metadata. Titles are searchable phrases people actually type, not clickbait.
+export function packagingUser(question: string, hook: string, sourceLine: string, answer?: { name: string; value: string }): string {
+  const hide = answer
+    ? `\nThe answer is the payoff of the video. NEVER write "${answer.name}" or its value (${answer.value}) in any field below, not even in tags. The viewer must watch to find out.`
+    : '';
+  return `TASK: write the metadata. Titles are searchable phrases people actually type, not clickbait.${hide}
 QUESTION: ${question}
 HOOK: ${hook}
 SOURCE LINE: ${sourceLine}
 Return JSON only:
 {
  "title": "max 60 characters; contains a search phrase people type (for example 'countries ranked by', 'which country has the most'); no ALL CAPS words; no hashtags",
- "summary": "one sentence restating the surprise",
+ "summary": "one sentence that makes people want the answer without giving it (a curiosity gap)",
  "hashtags": ["#shorts", "two more lowercase topic hashtags like #maps #geography"],
  "pinned_comment": "one question that invites a specific answer (their country, their guess), max 20 words",
  "ig_caption": "2 short lines, no hashtags",
