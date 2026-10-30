@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { run } from './lib/proc.js';
 import { readWav, writeWav } from './audio.js';
-import { countdownSchedule, guessPauseTicks } from '../remotion/schedule.js';
+import { countdownSchedule, guessPauseTicks, stripSlots } from '../remotion/schedule.js';
 import type { ShortProps } from '../remotion/types.js';
 
 const RATE = 48000;
@@ -46,8 +46,11 @@ async function makeSounds(dir: string): Promise<Record<Sound, string>> {
 
 // Where the sounds go, from the same timings the video uses.
 export function sfxCues(p: ShortProps): SfxCue[] {
-  const cues: SfxCue[] = [{ sound: 'whoosh', at: 0 }];
   const sec = (frame: number) => frame / FPS;
+  // The rank strip opening lands with a hit on frame 1 and ticks as its slots pop in.
+  const cues: SfxCue[] = p.format === 'MAP_REVEAL' && p.opening
+    ? [{ sound: 'hit', at: 0 }, ...stripSlots(p).map((s) => ({ sound: 'tick' as const, at: sec(s.pop) }))]
+    : [{ sound: 'whoosh', at: 0 }];
   const reveal = p.beats.find((b) => b.visual.startsWith('reveal_answer'));
   if (p.format === 'COUNTDOWN') {
     const times = countdownSchedule(p);

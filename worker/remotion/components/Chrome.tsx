@@ -24,14 +24,22 @@ export const Background: React.FC = () => (
   </AbsoluteFill>
 );
 
-export const Kicker: React.FC<{ text: string }> = ({ text }) => (
-  <div style={{ position: 'absolute', top: ZONE.kicker, left: SAFE.left, right: W - SAFE.right, textAlign: 'center',
-    fontFamily: FONT, fontWeight: 800, fontSize: 30, letterSpacing: 4, color: C.blue, textTransform: 'uppercase' }}>
-    {text}
-  </div>
-);
+// `from`: the kicker fades in then instead of being there from frame 0 (the rank strip opening).
+export const Kicker: React.FC<{ text: string; top?: number; from?: number }> = ({ text, top = ZONE.kicker, from = 0 }) => {
+  const frame = useCurrentFrame();
+  const o = from > 0 ? interpolate(frame, [from, from + 10], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }) : 1;
+  return (
+    <div style={{ position: 'absolute', top, left: SAFE.left, right: W - SAFE.right, textAlign: 'center', opacity: o,
+      fontFamily: FONT, fontWeight: 800, fontSize: 30, letterSpacing: 4, color: C.blue, textTransform: 'uppercase' }}>
+      {text}
+    </div>
+  );
+};
 
-export const Headline: React.FC<{ beats: TimedBeat[] }> = ({ beats }) => {
+// `low`: under the rank strip, a little lower and smaller, so it clears the strip and the kicker
+// above it and the answer's big number below it.
+const STRIP_HEADLINE = { top: 470, height: 146 };
+export const Headline: React.FC<{ beats: TimedBeat[]; low?: boolean }> = ({ beats, low }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const { beat, index } = currentBeat(beats, frame);
@@ -53,9 +61,9 @@ export const Headline: React.FC<{ beats: TimedBeat[] }> = ({ beats }) => {
     );
   }
   const s = spring({ frame: local, fps, config: { damping: 200 }, durationInFrames: 10 });
-  const size = text.length > 34 ? 64 : text.length > 22 ? 74 : 86;
+  const size = low ? (text.length > 34 ? 56 : text.length > 22 ? 64 : 76) : text.length > 34 ? 64 : text.length > 22 ? 74 : 86;
   return (
-    <div style={{ position: 'absolute', top: ZONE.headline, left: SAFE.left, right: W - SAFE.right, height: 220,
+    <div style={{ position: 'absolute', top: low ? STRIP_HEADLINE.top : ZONE.headline, left: SAFE.left, right: W - SAFE.right, height: low ? STRIP_HEADLINE.height : 220,
       display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
       <div style={{ fontFamily: FONT, fontWeight: 800, fontSize: size, lineHeight: 1.08, color: C.pale,
         letterSpacing: -1, opacity: s, transform: `translateY(${(1 - s) * 18}px)`, textWrap: 'balance' as any, textShadow: '0 6px 30px rgba(0,0,0,0.6)' }}>

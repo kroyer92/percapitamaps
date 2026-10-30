@@ -19,7 +19,7 @@ const WORLD_H = 520;
 const projection = geoEqualEarth().fitExtent([[20, MAP.centreY - WORLD_H / 2], [W - 20, MAP.centreY + WORLD_H / 2]], { type: 'FeatureCollection', features: FEATURES } as any);
 const path = geoPath(projection);
 
-interface Camera { k: number; cx: number; cy: number } // zoom factor and the projected point at the centre
+export interface Camera { k: number; cx: number; cy: number } // zoom factor and the projected point at the centre
 
 function quantileColors(map: Record<string, number>, ramp: string[]): Map<string, string> {
   const entries = Object.entries(map).sort((a, b) => a[1] - b[1]);
@@ -58,7 +58,7 @@ export const FULL_VIEW: MapView = { centreY: MAP.centreY, bottom: 1920, box: { w
 
 // A country fills most of the space between the headline and the captions.
 // `drop` moves it lower on screen, to make room for the answer's number above it.
-function camFor(iso: string | undefined, drop: number, box: { w: number; h: number }, shiftX = 0): Camera | undefined {
+export function camFor(iso: string | undefined, drop: number, box: { w: number; h: number }, shiftX = 0): Camera | undefined {
   const f = iso ? FEATURES.find((x) => x.iso3 === iso) : undefined;
   if (!f) return undefined;
   const m = mainland(f);
@@ -113,7 +113,11 @@ export const WorldMap: React.FC<{
   unit?: string;
   answerIso?: string;
   view?: MapView;
-}> = ({ map, cues, labelFor, threshold, thresholdLabel, unit, answerIso, view = FULL_VIEW }) => {
+  // An opening of its own (the rank strip): its own camera until `until`, with one country
+  // outlined and no label; the cues take over from where it ends. The key waits until `keyFrom`.
+  intro?: { until: number; cam: (frame: number) => Camera; outlineIso?: string };
+  keyFrom?: number;
+}> = ({ map, cues, labelFor, threshold, thresholdLabel, unit, answerIso, view = FULL_VIEW, intro, keyFrom = 0 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
 
@@ -134,8 +138,9 @@ export const WorldMap: React.FC<{
 
   // Camera: zoom and highlight cues fly to the country, the reveal flies to the answer, and a
   // fill cue goes back to the home view.
-  let from: () => Camera = home;
-  let to: () => Camera = home;
+  const introEnd = intro?.cam(intro.until);
+  let from: () => Camera = introEnd ? () => introEnd : home;
+  let to: () => Camera = from;
   let camStart = 0;
   for (const c of cues) {
     if (c.start > frame) break;
@@ -150,7 +155,7 @@ export const WorldMap: React.FC<{
   const b = to();
   // Zoom on a log scale so a big zoom doesn't rush at the end.
   const k = Math.exp(Math.log(a.k) + (Math.log(b.k) - Math.log(a.k)) * t);
-  const cam = { k, cx: a.cx + (b.cx - a.cx) * t, cy: a.cy + (b.cy - a.cy) * t };
+  const cam = intro && frame < intro.until ? intro.cam(frame) : { k, cx: a.cx + (b.cx - a.cx) * t, cy: a.cy + (b.cy - a.cy) * t };
   const transform = `translate(${W / 2}, ${view.centreY}) scale(${cam.k}) translate(${-cam.cx}, ${-cam.cy})`;
 
   // When the map fills on the hook, it is already coloured on frame 0: the first frame is what
@@ -170,12 +175,13 @@ export const WorldMap: React.FC<{
   const active = [...cues].reverse().find((c) => c.start <= frame && (c.kind === 'highlight' || c.kind === 'reveal' || c.kind === 'zoom'));
   // A fill cue after a zoom returns to the world view, so nothing stays outlined.
   const lastCue = [...cues].reverse().find((c) => c.start <= frame);
-  const activeIso = lastCue && lastCue.kind !== 'fill' ? active?.iso : undefined;
-  const pulse = active ? spring({ frame: frame - active.start, fps, config: { damping: 12 } }) : 0;
+  const introIso = intro?.outlineIso && frame < intro.until ? intro.outlineIso : undefined;
+  const activeIso = introIso ?? (lastCue && lastCue.kind !== 'fill' ? active?.iso : undefined);
+  const pulse = introIso ? spring({ frame: frame + 6, fps, config: { damping: 12 } }) : active ? spring({ frame: frame - active.start, fps, config: { damping: 12 } }) : 0;
 
   const activeFeature = activeIso ? FEATURES.find((f) => f.iso3 === activeIso) : undefined;
   // At the reveal, the answer's big number replaces the small label.
-  const label = activeIso && lastCue?.kind !== 'reveal' ? labelFor(activeIso) : undefined;
+  const label = activeIso && !introIso && lastCue?.kind !== 'reveal' ? labelFor(activeIso) : undefined;
   let labelPos: [number, number] | null = null;
   if (activeFeature) {
     const p = projection(geoCentroid(mainland(activeFeature) as any));
@@ -248,8 +254,9 @@ export const WorldMap: React.FC<{
           : <rect x={0} y={view.bottom - 110} width={W} height={111} fill="url(#bandfade)" />}
       </svg>
       {/* Blue key from the fill until the amber key replaces it. */}
-      {full && fillProgress > 0 && !(over.length > 0 && thresholdLabel && frame >= revealStart) && (
-        <div style={{ position: 'absolute', left: 0, right: 0, top: ZONE.visualBottom - 70, display: 'flex', justifyContent: 'center', opacity: fillProgress }}>
+      {full && fillProgress > 0 && frame >= keyFrom && !(over.length > 0 && thresholdLabel && frame >= revealStart) && (
+        <div style={{ position: 'absolute', left: 0, right: 0, top: ZONE.visualBottom - 70, display: 'flex', justifyContent: 'center',
+          opacity: fillProgress * (keyFrom > 0 ? interpolate(frame, [keyFrom, keyFrom + 10], [0, 1], { extrapolateRight: 'clamp' }) : 1) }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'rgba(10,29,43,0.88)', borderRadius: 14, padding: '10px 22px',
             fontFamily: FONT, color: C.pale, fontSize: 28, fontWeight: 700 }}>
             <span>Less</span>

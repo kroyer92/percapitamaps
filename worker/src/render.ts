@@ -12,7 +12,7 @@ import { synthesize, transcribe, type VoiceClip, type Word } from './voice.js';
 import { place, timedBeats, FPS } from './timeline.js';
 import { buildVoiceTrack, finalMix, pickMusic, type MusicPick } from './audio.js';
 import { buildSfxTrack } from './sfx.js';
-import type { ShortProps } from '../remotion/types.js';
+import type { Opening, ShortProps } from '../remotion/types.js';
 
 let bundlePromise: Promise<string> | undefined;
 
@@ -26,7 +26,7 @@ async function serveUrl(): Promise<string> {
   }
 }
 
-export function buildProps(format: Format, facts: Facts, ds: Pick<CatalogEntry, 'decimals' | 'prefix' | 'suffix' | 'threshold'>, beats: ShortProps['beats'], durationInFrames: number): ShortProps {
+export function buildProps(format: Format, facts: Facts, ds: Pick<CatalogEntry, 'decimals' | 'prefix' | 'suffix' | 'threshold'>, beats: ShortProps['beats'], durationInFrames: number, opening?: Opening): ShortProps {
   const top = facts.ranking.slice(0, 15);
   // Also every country the video zooms to (the guess may be Russia at #14) and the Guess options.
   const named = new Set([
@@ -58,6 +58,8 @@ export function buildProps(format: Format, facts: Facts, ds: Pick<CatalogEntry, 
       suffix: ds.suffix ?? '',
     };
   }
+  // The badge under the country's rank says what is ranked (the kicker without its year).
+  if (opening && format === 'MAP_REVEAL') props.opening = { ...opening, label: facts.title };
   if (facts.scale) props.scale = { groups: facts.scale.groups.map((g) => ({ ...g, iso2: g.iso3 ? iso3ToIso2(g.iso3) : undefined })), per: facts.scale.per };
   if (facts.guess) {
     props.guess = {
@@ -80,6 +82,7 @@ export async function renderShort(opts: {
   facts: Facts;
   ds: Pick<CatalogEntry, 'decimals' | 'prefix' | 'suffix' | 'threshold'>;
   beats: Beat[];
+  opening?: Opening; // Map Reveal opening test
   voice: string;
   seed: number;
   reuseClips?: VoiceClip[]; // when only the hook changed, re-voice beat 1 only
@@ -114,7 +117,7 @@ export async function renderShort(opts: {
   }
 
   const durationInFrames = Math.ceil(seconds * FPS);
-  const props = buildProps(opts.format, opts.facts, opts.ds, timedBeats(placed, seconds, heard), durationInFrames);
+  const props = buildProps(opts.format, opts.facts, opts.ds, timedBeats(placed, seconds, heard), durationInFrames, opts.opening);
   await fs.writeFile(path.join(workDir, 'props.json'), JSON.stringify(props));
 
   opts.onStep?.('Starting the video renderer (the first run may download Chrome)');

@@ -5,6 +5,7 @@ import { chatJson } from './llm.js';
 import { factsForLlm, type Facts } from './facts.js';
 import * as P from './prompts.js';
 import { planFor, writePlanned, type Slot } from './plan.js';
+import { spokenName, type Opening } from './opening.js';
 import { allowedNumbers, checkScript, isMinor, type Filler, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
 
 export interface Hook { type: string; text: string }
@@ -141,16 +142,18 @@ export async function generateContent(opts: {
   twist?: string;
   lengthBand?: string;
   hookType?: string;
+  opening?: Opening; // Map Reveal only: the rank strip opening (opening.ts)
   onStep?: (s: string) => void;
   recentLines?: string[][]; // spoken lines of the last few videos, so wording doesn't repeat
 }): Promise<Content> {
   const { question, format, facts } = opts;
+  const opening = format === 'MAP_REVEAL' ? opts.opening : undefined;
   const onStep = opts.onStep ?? (() => {});
   // The plan only depends on the facts, so it is made first: every country it names (the guess
   // may be Russia at #14) then goes into FACTS, where the writer and the critic can see its number.
-  const slots = planFor(format, question, facts);
+  const slots = planFor(format, question, facts, opening);
   const named = new Set((slots ?? []).map((sl) => sl.country).filter(Boolean));
-  const mentioned = facts.ranking.filter((r) => named.has(r.name)).map((r) => r.iso3);
+  const mentioned = facts.ranking.filter((r) => named.has(r.name) || r.iso3 === opening?.iso).map((r) => r.iso3);
   const llmFacts = factsForLlm(facts, format, mentioned);
   const system = P.contentSystem(JSON.stringify(llmFacts));
   const allowed = allowedNumbers(llmFacts, question);
@@ -172,7 +175,8 @@ export async function generateContent(opts: {
     if (slots) {
       // Slot numbers are computed from the facts (e.g. two groups added up), so they are allowed too.
       for (const sl of slots) for (const n of sl.numbers) for (const x of numbersIn(n)) allowed.add(x);
-      script = await writePlanned(system, slots, spoiler?.name ?? '', fixHint, onStep, opts.recentLines, facts.ranking.map((r) => r.name), facts.unit);
+      const names = [...facts.ranking.map((r) => r.name), ...(opening ? [spokenName(opening.iso)] : [])];
+      script = await writePlanned(system, slots, spoiler?.name ?? '', fixHint, onStep, opts.recentLines, names, facts.unit);
       // The plan sets the length, so only real problems (numbers, codes) stop a planned script.
       // No fillers: padding a planned script added 3 extra rank lines and pushed job #16 to 63 s.
       const left = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, [])
@@ -188,10 +192,16 @@ export async function generateContent(opts: {
     const h = await chatJson<{ hooks: Hook[]; test_first: number }>({ temperature: 0.6, system, user: P.hooksUser(question, originalHook) });
     const hooks = (h.hooks ?? []).filter((x) => x?.text && wordCount(x.text) <= 10 && !isBanned(x.text) && !spoils(x.text, spoiler) && numbersIn(x.text).every((n) => allowed.has(n))).slice(0, 5);
     let chosen = -1;
-    if (opts.hookType) chosen = hooks.findIndex((x) => x.type === opts.hookType);
-    if (chosen < 0 && hooks.length) chosen = Math.max(0, Math.min(hooks.length - 1, (h.test_first ?? 1) - 1));
-    if (chosen >= 0) script.beats[0].vo = hooks[chosen].text;
-    if (wordCount(question) <= 9) script.beats[0].on_screen = question;
+    // The rank strip keeps its own line (the alternatives stay as buttons on the preview), and
+    // shows the words the voice says instead of the question: one text on screen, not two.
+    const oneText = () => { if (opening) script.beats[0].on_screen = script.beats[0].vo; };
+    if (opening) oneText();
+    else {
+      if (opts.hookType) chosen = hooks.findIndex((x) => x.type === opts.hookType);
+      if (chosen < 0 && hooks.length) chosen = Math.max(0, Math.min(hooks.length - 1, (h.test_first ?? 1) - 1));
+      if (chosen >= 0) script.beats[0].vo = hooks[chosen].text;
+      if (wordCount(question) <= 9) script.beats[0].on_screen = question;
+    }
 
     onStep('Writing the title and description');
     const pk = await chatJson<Packaging>({ temperature: 0.6, system, user: P.packagingUser(question, script.beats[0].vo, facts.source_line, spoiler) });
@@ -214,9 +224,11 @@ export async function generateContent(opts: {
       // are built from the facts in code, instead of sending the topic to dead letter.
       onStep(`Critic failed again; using plain lines for: ${critic.issues.map((i) => i.beat ?? 'packaging').join(', ')}`);
       usePlainLines(critic, script, slots, pk, question);
+      oneText();
     }
     if (critic.verdict === 'pass') {
-      return { script, originalHook, hooks, chosenHook: chosen, hookType: chosen >= 0 ? hooks[chosen].type : 'SCRIPT', packaging: pk, critic };
+      if (opening) script.opening = opening;
+      return { script, originalHook, hooks, chosenHook: chosen, hookType: opening ? 'RANK_STRIP' : chosen >= 0 ? hooks[chosen].type : 'SCRIPT', packaging: pk, critic };
     }
     fixHint = critic.fix_hint || critic.issues?.map((i) => i.detail).join(' ');
     if (round === 1) throw new NeedsHuman('The fact-check critic failed the script twice.', critic);

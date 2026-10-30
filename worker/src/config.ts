@@ -74,6 +74,9 @@ export const config = {
   // every scored video lost the most viewers there (0:04–0:07). GUESS_BEAT=on brings it back.
   // Countdown keeps its guess: it comes later and drives the pinned "you" row under the ladder.
   guessBeat: (env.GUESS_BEAT ?? 'off').toLowerCase() === 'on',
+  // The Map Reveal opening test (from 2 Nov 2026, see opening.ts): "alternate" gives every other
+  // Map Reveal the rank strip opening; "classic" or "rank_strip" gives every Map Reveal that one.
+  mrOpening: (['classic', 'rank_strip'].find((v) => v === (env.MR_OPENING ?? '').toLowerCase()) ?? 'alternate') as 'alternate' | 'classic' | 'rank_strip',
   // Weekly analytics JSON for Claude's review; keep off until the YouTube API audit is approved.
   analysisExport: (env.ANALYSIS_EXPORT ?? 'off').toLowerCase() === 'on',
   analysisExportToken: env.ANALYSIS_EXPORT_TOKEN ?? '',

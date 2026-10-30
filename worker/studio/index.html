@@ -432,8 +432,11 @@ function paintLab(s) {
   const body = e.measured
     ? block('Format · median engaged views', e.formats) + block('Hook type', e.hooks) + block('Length', e.lengths) + block('Voice', e.voices)
     : `<div class="empty">No measured videos yet, so no winners. The bars fill in as the 24 h, 72 h and 7 day numbers arrive.</div>`;
+  // The Map Reveal opening test: stayed per opening, and whether it can be read yet.
+  const o = e.opening;
+  const openingBlock = o ? `<div class="lab-h">Map Reveal opening · median stayed at 72 h</div>` + o.arms.map((a, i) => `<div class="hb"><span class="lab">${esc(a.label)}</span><span class="t"><i class="${o.ready && (i === 0) === (o.lead >= 0) ? 'win' : ''}" style="width:${(a.median ?? 0).toFixed(1)}%"></i></span><span class="v">${a.median === null ? '–' : `${Math.round(a.median)}%`} <small>${a.n}/${o.min}</small></span></div>`).join('') + `<div class="note-s">${esc(o.lines.at(-1))}</div>` : '';
   const tune = e.tune.enabled ? (e.tune.updated_at ? `Auto-tune last moved the weights ${since(e.tune.updated_at)} ago.` : 'Auto-tune is on and starts moving weights once 3 videos per option are measured.') : 'Auto-tune is off (/tune on in Telegram).';
-  $('lab').innerHTML = `<div class="h">Experiment lab</div>${body}<div class="note-s">${running.length ? `Testing now: ${esc(running.join(' · '))}. ` : ''}${esc(tune)}</div>`;
+  $('lab').innerHTML = `<div class="h">Experiment lab</div>${openingBlock}${body}<div class="note-s">${running.length ? `Testing now: ${esc(running.join(' · '))}. ` : ''}${esc(tune)}</div>`;
 }
 
 let state;
@@ -529,6 +532,8 @@ function demoState() {
       voices: [{ label: 'am_michael', median: 3300, n: 6 }, { label: 'af_heart', median: 2800, n: 6 }],
       tune: { enabled: true, updated_at: h(-60) },
       tests: { formats: ['Map Reveal', 'Top 10 Countdown', 'Guess the Country'], voices: ['am_michael', 'af_heart'], hooks: ['STAKES', 'CONTRADICTION', 'YOU'], lengths: ['28-32', '33-38'] },
+      opening: { ready: false, lead: 6, min: 5, bar: 10, arms: [{ key: 'rank_strip', label: 'Rank strip', n: 3, median: 58, pending: 2 }, { key: 'classic', label: 'Classic', n: 4, median: 47, pending: 1 }],
+        lines: ['⏳ Too early to read: each opening needs 5 Map Reveal videos with 72 h numbers. They should all be in around Mon 16 Nov. Keep both openings as they are until then.'] },
     },
   };
 }

@@ -1,11 +1,13 @@
 import countries from 'i18n-iso-countries';
 import { ISO3 } from './data/countries.js';
+import type { Opening } from '../remotion/types.js';
 
 // Code checks on the model's output. Numbers are the main thing: every number in the
 // voiceover, on-screen text and title must appear in the facts.
 
 export interface Beat { vo: string; on_screen: string; visual: string; emphasis_words?: string[]; filler?: boolean }
-export interface Script { beats: Beat[]; loop_check?: string; models?: string[] } // models: which language models wrote it
+// models: which language models wrote it; opening: set on a Map Reveal with the rank strip opening.
+export interface Script { beats: Beat[]; loop_check?: string; models?: string[]; opening?: Opening }
 
 const NUM = /\d[\d,]*(?:\.\d+)?/g;
 
@@ -157,13 +159,16 @@ function padShort(script: Script, minWords: number, sp: Spoiler, fillers: Filler
   }
 }
 
+// On-screen text longer than 6 words, cut to its first 6 (without a dangling "of" or comma).
+export function cutOnScreen(text: string): string {
+  if (wordCount(text) <= 6) return text;
+  const w = text.trim().split(/\s+/).slice(0, 6);
+  while (w.length > 2 && /^(in|the|of|a|an|and|or|to|per|with|for|than|by|at|on|is|are)$/i.test(w[w.length - 1])) w.pop();
+  return w.join(' ').replace(/[,;:.\-–]+$/, '');
+}
+
 function tidy(script: Script): void {
-  for (const b of script.beats) {
-    if (!b.on_screen || wordCount(b.on_screen) <= 6) continue;
-    const w = b.on_screen.trim().split(/\s+/).slice(0, 6);
-    while (w.length > 2 && /^(in|the|of|a|an|and|or|to|per|with|for|than|by|at|on|is|are)$/i.test(w[w.length - 1])) w.pop();
-    b.on_screen = w.join(' ').replace(/[,;:.\-–]+$/, '');
-  }
+  for (const b of script.beats) if (b.on_screen) b.on_screen = cutOnScreen(b.on_screen);
   for (let i = script.beats.length - 1; i > 0 && script.beats.length > 7; i--) {
     const b = script.beats[i];
     if (b.vo && !b.filler && script.beats.some((o, j) => j < i && !o.filler && o.vo && similar(o.vo, b.vo))) script.beats.splice(i, 1);

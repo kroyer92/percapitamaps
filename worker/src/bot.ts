@@ -10,7 +10,7 @@ import { followup } from './discover.js';
 import { track } from './activity.js';
 import { fmtIn } from './lib/time.js';
 import { setTune } from './tune.js';
-import { videosOverview } from './analytics.js';
+import { openingTest, videosOverview } from './analytics.js';
 
 const HELP = [
   '<b>Per Capita Maps Studio</b>',
@@ -21,6 +21,7 @@ const HELP = [
   '/produce [n] – make n videos now (default 1)',
   '/videos – every recent video, its link and its scorecards',
   '/tune [on|off|reset] – see or undo the weekly hook/length auto-tuning',
+  '/opening – how the Map Reveal opening test is going, and whether it can be read yet',
   '/status – queue, waiting approvals and next slots',
   '/help – this list',
 ].join('\n');
@@ -90,6 +91,9 @@ async function onMessage(text: string): Promise<void> {
     case '/tune':
       await say(await setTune((args[0] ?? '').toLowerCase()));
       return;
+    case '/opening':
+      await say(['<b>Map Reveal opening test</b> · rank strip vs classic, stayed at 72 h', ...(await openingTest()).lines.map(esc)].join('\n'));
+      return;
     default:
       if (text.startsWith('/')) await say(HELP);
   }
@@ -136,6 +140,7 @@ export async function startBot(): Promise<void> {
       { command: 'followup', description: 'Two related videos for a winner' },
       { command: 'videos', description: 'Recent videos and their scorecards' },
       { command: 'tune', description: 'See or undo auto-tuning: /tune off' },
+      { command: 'opening', description: 'Map Reveal opening test: can it be read yet?' },
       { command: 'help', description: 'All commands' },
     ],
   }).catch(() => undefined);

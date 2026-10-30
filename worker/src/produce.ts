@@ -6,6 +6,8 @@ import { one, q } from './db.js';
 import { getDataset } from './datasets.js';
 import { loadFacts, type Facts } from './facts.js';
 import { generateContent, NeedsHuman, type Content, type Hook } from './content.js';
+import { openingFor, spokenName, type Opening } from './opening.js';
+import { cutOnScreen, wordCount } from './validate.js';
 import { takeModelsUsed, unloadModels } from './llm.js';
 import { lowEndProblem } from './discover.js';
 import { renderShort } from './render.js';
@@ -26,6 +28,7 @@ export interface JobRow {
   voice: string;
   length_band: string | null;
   hook_type: string | null;
+  opening: 'rank_strip' | 'classic' | null; // Map Reveal opening test; null for other formats
   facts: Facts;
   script: Content['script'];
   hooks: { list: Hook[]; original: string };
@@ -64,6 +67,21 @@ export function jobDir(id: number) {
 
 export function jobVideo(id: number) {
   return path.join(config.rendersDir, `job-${id}.mp4`);
+}
+
+// The Map Reveal opening test: the opening with fewer live videos goes next (the rank strip on a
+// tie after a classic, and to start), so both get the same mix of topics and days. Failed and
+// rejected jobs don't count, which keeps the published videos even. MR_OPENING can fix one opening.
+async function pickOpening(facts: Facts): Promise<Opening | undefined> {
+  const strip = openingFor(facts);
+  if (!strip || config.mrOpening === 'classic') return undefined;
+  if (config.mrOpening === 'rank_strip') return strip;
+  const c = await one<{ strip: number; classic: number; last: string | null }>(
+    `SELECT count(*) FILTER (WHERE opening = 'rank_strip')::int AS strip, count(*) FILTER (WHERE opening = 'classic')::int AS classic,
+       (SELECT opening FROM jobs WHERE opening IS NOT NULL ORDER BY id DESC LIMIT 1) AS last
+     FROM jobs WHERE opening IS NOT NULL AND status NOT IN ('needs_human','dead_letter','skipped','render_failed','rejected')`);
+  const s = c?.strip ?? 0, k = c?.classic ?? 0;
+  return s < k || (s === k && c?.last !== 'rank_strip') ? strip : undefined;
 }
 
 async function claimTopic(preferred: Format) {
@@ -133,8 +151,10 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
     // The last 10 scripts, so the writer can steer clear of wording they already used.
     const recent = await q<{ script: Content['script'] }>(`SELECT script FROM jobs WHERE script IS NOT NULL AND id <> $1 ORDER BY id DESC LIMIT 10`, [id]);
     const recentLines = recent.map((r) => (r.script?.beats ?? []).map((b) => b.vo ?? ''));
+    const opening = format === 'MAP_REVEAL' ? await pickOpening(facts) : undefined;
+    if (format === 'MAP_REVEAL') await q('UPDATE jobs SET opening = $2 WHERE id = $1', [id, opening ? 'rank_strip' : 'classic']);
     takeModelsUsed(); // forget the topic checks; record only the models that write this video
-    const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined, recentLines, onStep: (step) => { console.log(`[job ${id}] ${step}`); office.working('writer', step, id); } });
+    const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined, opening, recentLines, onStep: (step) => { console.log(`[job ${id}] ${step}`); office.working('writer', step, id); } });
     await q(
       `UPDATE jobs SET script = $2, hooks = $3, packaging = $4, critic = $5, chosen_hook = $6, hook_type = $7, status = 'rendering', updated_at = now() WHERE id = $1`,
       [id, { ...content.script, models: takeModelsUsed() }, { list: content.hooks, original: content.originalHook }, content.packaging, content.critic, content.chosenHook, content.hookType],
@@ -167,6 +187,7 @@ export async function renderAndPreview(id: number, reuseClips = false): Promise<
     facts: job.facts,
     ds,
     beats: job.script.beats,
+    opening: job.script.opening,
     voice: job.voice,
     seed: id,
     reuseClips: reuseClips && job.render ? job.render.clips : undefined,
@@ -220,6 +241,7 @@ export async function sendPreview(id: number): Promise<void> {
     `<b>#${id}</b> · ${FORMAT_NAMES[job.format]} · ${job.voice} · ${job.render?.seconds.toFixed(1)} s${job.script.models?.length ? ` · written by ${esc(job.script.models.join(', '))}` : ''}`,
     `<b>Q:</b> ${esc(topic.question)}`,
     `<b>Hook now:</b> ${esc(job.script.beats[0].vo)}`,
+    ...(job.opening ? [`<b>Opening test:</b> ${openingText(job)}`] : []),
     ...hooks.map((h, i) => `${i === job.chosen_hook ? '▶' : `${i + 1}.`} ${esc(h.type)}: ${esc(h.text)}`),
     `<b>Title:</b> ${esc(job.packaging.title)}`,
     `<b>Why this video:</b> ${esc(topic.trend_link ? `rides "${topic.trend_link}"` : topic.source === 'launch' ? 'launch concept' : topic.source === 'followup' ? 'follow-up to a winner' : 'evergreen angle')}${topic.expected_twist ? ` · ${esc(topic.expected_twist)}` : ''}`,
@@ -231,13 +253,28 @@ export async function sendPreview(id: number): Promise<void> {
   office.waiting('publisher', `#${id} is waiting for your OK in Telegram`, id);
 }
 
+function openingText(job: Pick<JobRow, 'opening' | 'script'>): string {
+  const o = job.script.opening;
+  return job.opening === 'rank_strip' && o
+    ? `rank strip (${esc(spokenName(o.iso))} #${o.rank}). A Hook button switches it to the classic opening.`
+    : 'classic (the question over the whole map).';
+}
+
 export async function swapHook(id: number, index: number): Promise<void> {
   const job = (await one<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]))!;
   const hook = job.hooks?.list?.[index];
   if (!hook) return;
-  const beats = job.script.beats.map((b, i) => (i === 0 ? { ...b, vo: hook.text } : b));
-  await q(`UPDATE jobs SET script = $2, chosen_hook = $3, hook_type = $4, status = 'rendering', updated_at = now() WHERE id = $1`, [id, { ...job.script, beats }, index, hook.type]);
-  await say(`🎬 Re-rendering #${id} with hook ${index + 1} (${esc(hook.type)}). About 5 minutes.`);
+  // Another hook doesn't fit the rank strip, so the video goes back to the classic opening, with
+  // the question on screen as before the test; the test then counts it as classic.
+  const toClassic = job.opening === 'rank_strip';
+  const question = toClassic ? (await one<{ question: string }>('SELECT question FROM topics WHERE id = $1', [job.topic_id]))!.question : '';
+  const beats = job.script.beats.map((b, i) => (i !== 0 ? b : toClassic
+    ? { ...b, vo: hook.text, on_screen: wordCount(question) <= 9 ? question : cutOnScreen(question) }
+    : { ...b, vo: hook.text }));
+  const script = { ...job.script, beats, opening: toClassic ? undefined : job.script.opening };
+  await q(`UPDATE jobs SET script = $2, chosen_hook = $3, hook_type = $4, opening = $5, status = 'rendering', updated_at = now() WHERE id = $1`,
+    [id, script, index, hook.type, toClassic ? 'classic' : job.opening]);
+  await say(`🎬 Re-rendering #${id} with hook ${index + 1} (${esc(hook.type)})${toClassic ? ' and the classic opening' : ''}. About 5 minutes.`);
   await renderAndPreview(id, true);
 }
 

@@ -40,3 +40,20 @@ export function guessPauseTicks(p: ShortProps, fps = 30): number[] {
   if (!pause || reveal === undefined) return [];
   return [3, 2, 1].map((k) => reveal - k * fps).filter((t) => t >= pause.start);
 }
+
+// The rank strip opening (Map Reveal test): slots for #1 to #5 across the top, plus the opening
+// country's own slot when it ranks lower. They pop in from the right as the hook ends, #1 last, a
+// tick each; a slot fills when the voice gets to its country, and #1 at the reveal.
+export interface StripSlot { rank: number; pop: number; fill: number }
+export function stripSlots(p: ShortProps): StripSlot[] {
+  const o = p.opening;
+  if (!o) return [];
+  const hookEnd = p.beats[1]?.start ?? 60;
+  const reveal = p.beats.find((b) => b.visual.startsWith('reveal_answer'))?.start ?? p.durationInFrames;
+  const ranks = [1, 2, 3, 4, 5, ...(o.rank > 5 ? [o.rank] : [])];
+  return ranks.map((rank, i) => {
+    const iso = p.ranking.find((r) => r.rank === rank)?.iso3;
+    const named = p.beats.find((b) => iso && b.visual === `highlight:${iso}`)?.start ?? reveal;
+    return { rank, pop: hookEnd - 6 + (ranks.length - 1 - i) * 3, fill: rank === o.rank ? hookEnd + 6 : Math.min(named, reveal) };
+  });
+}

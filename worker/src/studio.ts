@@ -12,7 +12,7 @@ import { queue } from './lib/queue.js';
 import { upcomingSlots } from './lib/time.js';
 import { getTune } from './tune.js';
 import * as office from './activity.js';
-import type { ChannelStats } from './analytics.js';
+import { openingTest, type ChannelStats } from './analytics.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pageDir = path.resolve(here, '../studio');
@@ -187,7 +187,9 @@ async function experiments(rows: Latest[]) {
     return [...g.entries()].map(([k, v]) => ({ key: k, label: label(k), median: median(v), n: v.length })).sort((a, b) => (b.median ?? 0) - (a.median ?? 0));
   };
   const tune = await getTune();
+  const opening = await openingTest().catch(() => null);
   return {
+    opening, // the Map Reveal opening test, with its own readiness rule
     formats: group('format', (k) => FORMAT_NAMES[k as Format] ?? k),
     voices: group('voice', (k) => k),
     hooks: group('hook_type', (k) => k.toLowerCase().replace(/_/g, ' ')),
