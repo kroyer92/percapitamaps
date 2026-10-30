@@ -28,7 +28,7 @@ export interface JobRow {
   voice: string;
   length_band: string | null;
   hook_type: string | null;
-  opening: 'rank_strip' | 'classic' | null; // Map Reveal opening test; null for other formats
+  opening: 'rank_strip' | 'classic' | null; // Map Reveal opening test; null outside it
   facts: Facts;
   script: Content['script'];
   hooks: { list: Hook[]; original: string };
@@ -72,10 +72,8 @@ export function jobVideo(id: number) {
 // The Map Reveal opening test: the opening with fewer live videos goes next (the rank strip on a
 // tie after a classic, and to start), so both get the same mix of topics and days. Failed and
 // rejected jobs don't count, which keeps the published videos even. MR_OPENING can fix one opening.
-async function pickOpening(facts: Facts): Promise<Opening | undefined> {
-  const strip = openingFor(facts);
-  if (!strip || config.mrOpening === 'classic') return undefined;
-  if (config.mrOpening === 'rank_strip') return strip;
+async function pickOpening(strip: Opening): Promise<Opening | undefined> {
+  if (config.mrOpening !== 'alternate') return config.mrOpening === 'rank_strip' ? strip : undefined;
   const c = await one<{ strip: number; classic: number; last: string | null }>(
     `SELECT count(*) FILTER (WHERE opening = 'rank_strip')::int AS strip, count(*) FILTER (WHERE opening = 'classic')::int AS classic,
        (SELECT opening FROM jobs WHERE opening IS NOT NULL ORDER BY id DESC LIMIT 1) AS last
@@ -151,8 +149,11 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
     // The last 10 scripts, so the writer can steer clear of wording they already used.
     const recent = await q<{ script: Content['script'] }>(`SELECT script FROM jobs WHERE script IS NOT NULL AND id <> $1 ORDER BY id DESC LIMIT 10`, [id]);
     const recentLines = recent.map((r) => (r.script?.beats ?? []).map((b) => b.vo ?? ''));
-    const opening = format === 'MAP_REVEAL' ? await pickOpening(facts) : undefined;
-    if (format === 'MAP_REVEAL') await q('UPDATE jobs SET opening = $2 WHERE id = $1', [id, opening ? 'rank_strip' : 'classic']);
+    // Only Map Reveals that could take either opening are in the test, so both get the same kind of
+    // topic. One without a famous country ranked 2nd to 15th keeps the classic and sits the test out.
+    const strip = format === 'MAP_REVEAL' ? openingFor(facts) : undefined;
+    const opening = strip && (await pickOpening(strip));
+    if (strip) await q('UPDATE jobs SET opening = $2 WHERE id = $1', [id, opening ? 'rank_strip' : 'classic']);
     takeModelsUsed(); // forget the topic checks; record only the models that write this video
     const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined, opening, recentLines, onStep: (step) => { console.log(`[job ${id}] ${step}`); office.working('writer', step, id); } });
     await q(
@@ -241,7 +242,7 @@ export async function sendPreview(id: number): Promise<void> {
     `<b>#${id}</b> · ${FORMAT_NAMES[job.format]} · ${job.voice} · ${job.render?.seconds.toFixed(1)} s${job.script.models?.length ? ` · written by ${esc(job.script.models.join(', '))}` : ''}`,
     `<b>Q:</b> ${esc(topic.question)}`,
     `<b>Hook now:</b> ${esc(job.script.beats[0].vo)}`,
-    ...(job.opening ? [`<b>Opening test:</b> ${openingText(job)}`] : []),
+    ...(job.format === 'MAP_REVEAL' ? [`<b>Opening test:</b> ${openingText(job)}`] : []),
     ...hooks.map((h, i) => `${i === job.chosen_hook ? '▶' : `${i + 1}.`} ${esc(h.type)}: ${esc(h.text)}`),
     `<b>Title:</b> ${esc(job.packaging.title)}`,
     `<b>Why this video:</b> ${esc(topic.trend_link ? `rides "${topic.trend_link}"` : topic.source === 'launch' ? 'launch concept' : topic.source === 'followup' ? 'follow-up to a winner' : 'evergreen angle')}${topic.expected_twist ? ` · ${esc(topic.expected_twist)}` : ''}`,
@@ -253,11 +254,11 @@ export async function sendPreview(id: number): Promise<void> {
   office.waiting('publisher', `#${id} is waiting for your OK in Telegram`, id);
 }
 
-function openingText(job: Pick<JobRow, 'opening' | 'script'>): string {
+function openingText(job: Pick<JobRow, 'opening' | 'script' | 'facts'>): string {
   const o = job.script.opening;
-  return job.opening === 'rank_strip' && o
-    ? `rank strip (${esc(spokenName(o.iso))} #${o.rank}). A Hook button switches it to the classic opening.`
-    : 'classic (the question over the whole map).';
+  if (job.opening === 'rank_strip' && o) return `rank strip (${esc(spokenName(o.iso))} #${o.rank}). A Hook button switches it to the classic opening and out of the test.`;
+  if (job.opening === 'classic') return 'classic (the question over the whole map).';
+  return openingFor(job.facts) ? 'classic, not counted.' : 'classic, not counted: no famous country is ranked 2nd to 15th.';
 }
 
 export async function swapHook(id: number, index: number): Promise<void> {
@@ -265,7 +266,8 @@ export async function swapHook(id: number, index: number): Promise<void> {
   const hook = job.hooks?.list?.[index];
   if (!hook) return;
   // Another hook doesn't fit the rank strip, so the video goes back to the classic opening, with
-  // the question on screen as before the test; the test then counts it as classic.
+  // the question on screen as before the test. The test then leaves it out: counting it as classic
+  // would give that side the topics the rank strip didn't suit.
   const toClassic = job.opening === 'rank_strip';
   const question = toClassic ? (await one<{ question: string }>('SELECT question FROM topics WHERE id = $1', [job.topic_id]))!.question : '';
   const beats = job.script.beats.map((b, i) => (i !== 0 ? b : toClassic
@@ -273,8 +275,8 @@ export async function swapHook(id: number, index: number): Promise<void> {
     : { ...b, vo: hook.text }));
   const script = { ...job.script, beats, opening: toClassic ? undefined : job.script.opening };
   await q(`UPDATE jobs SET script = $2, chosen_hook = $3, hook_type = $4, opening = $5, status = 'rendering', updated_at = now() WHERE id = $1`,
-    [id, script, index, hook.type, toClassic ? 'classic' : job.opening]);
-  await say(`🎬 Re-rendering #${id} with hook ${index + 1} (${esc(hook.type)})${toClassic ? ' and the classic opening' : ''}. About 5 minutes.`);
+    [id, script, index, hook.type, toClassic ? null : job.opening]);
+  await say(`🎬 Re-rendering #${id} with hook ${index + 1} (${esc(hook.type)})${toClassic ? ' and the classic opening, outside the opening test' : ''}. About 5 minutes.`);
   await renderAndPreview(id, true);
 }
 

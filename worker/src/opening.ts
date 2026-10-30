@@ -2,7 +2,8 @@
 // whole coloured map. The rank strip opening starts on one famous country the viewer knows, zoomed
 // in, with its rank ("America? Only 6th richest."); its badge then flies into a strip of slots #1
 // to #5 at the top, where #1 stays a "?" until the reveal. Every other Map Reveal gets the rank
-// strip (produce.ts), so both openings meet the same mix of topics; "stayed" at 72 h decides.
+// strip (produce.ts), so both openings meet the same mix of topics; "stayed" at 72 h decides. A topic
+// without a famous country ranked 2nd to 15th keeps the classic opening and isn't counted.
 import { FAMOUS, type Facts, type RankRow } from './facts.js';
 import { countryName } from './data/countries.js';
 import type { Slot } from './plan.js';

@@ -120,6 +120,7 @@ the worker adds the Instagram Reel's insights, and `worker/src/scorecard.ts` sco
 - **Map Reveal opening test** (from 2 Nov 2026, `worker/src/opening.ts`): every other Map Reveal
   opens on a famous country ranked 2nd to 15th ("America? Only 6th richest."), whose rank flies into
   a strip of slots #1 to #5 where #1 stays "?" until the reveal; the rest keep the classic opening.
+  Topics without such a country, and rank strip videos moved to another hook, sit the test out.
   `/opening`, the weekly report and the Studio lab compare stayed at 72 h, and say "too early" until
   each opening has 5 measured videos; then a lead of 10 points decides. `MR_OPENING=rank_strip` or
   `classic` in `.env` gives every Map Reveal one opening. Try it with
