@@ -124,7 +124,7 @@ the worker adds the Instagram Reel's insights, and `worker/src/scorecard.ts` sco
   `/opening`, the weekly report and the Studio lab compare stayed at 72 h, and say "too early" until
   each opening has 5 measured videos; then a lead of 10 points decides. `MR_OPENING=rank_strip` or
   `classic` in `.env` gives every Map Reveal one opening. Try it with
-  `npm run test-render -- --concept cattle --opening rank_strip`.
+  `docker compose exec render-worker npm run test-render -- --concept cattle --opening rank_strip`.
 - **Weekly export for Claude** (`ANALYSIS_EXPORT=on`, `ANALYSIS_EXPORT_TOKEN` of 24+ random
   characters): writes `public/analysis/<token>.json`. Keep it off until the YouTube API audit is
   approved and `privacy.md` allows it.
