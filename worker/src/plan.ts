@@ -5,6 +5,7 @@ import { config, type Format } from './config.js';
 import type { Facts, RankRow } from './facts.js';
 import { chatJson } from './llm.js';
 import { isBanned, numbersIn, wordCount, type Beat, type Script } from './validate.js';
+import { anchorHookSlot, type Opening } from './opening.js';
 
 export interface Slot {
   role: 'hook' | 'guess' | 'contender' | 'reveal' | 'closer' | 'then' | 'group' | 'options' | 'fixed';
@@ -15,6 +16,8 @@ export interface Slot {
   alts?: string[]; // other plain lines that say the same thing; the one used least lately wins
   visual: string;
   on_screen: string;
+  maxWords?: number; // tighter than the role's limit
+  check?: (line: string) => string | undefined; // a rule of this slot's own: the problem, if any
 }
 
 // "the United States", "the Netherlands"; plain names otherwise.
@@ -215,8 +218,8 @@ const nameOf = (s: string) => s.split(': ')[0];
 const valueOf = (s: string) => s.split(': ').slice(1).join(': ');
 
 // One story per format. Formats the code can't plan (missing facts) return undefined and
-// fall back to the old single-prompt writer.
-export function planFor(format: Format, question: string, f: Facts): Slot[] | undefined {
+// fall back to the old single-prompt writer. `opening`: the Map Reveal opening test (opening.ts).
+export function planFor(format: Format, question: string, f: Facts, opening?: Opening): Slot[] | undefined {
   const top = f.ranking[0];
   if (!top) return undefined;
   const c: Ctx = { question, f, u: f.unit, top, seed: hash(`${f.dataset_id ?? ''}|${question}`) };
@@ -224,8 +227,9 @@ export function planFor(format: Format, question: string, f: Facts): Slot[] | un
 
   if (format === 'MAP_REVEAL') {
     return keep([
-      hookSlot(c, 'map_fill'),
-      config.guessBeat ? guessSlot(c, 5, (iso) => `zoom_to:${iso}`) : undefined, // never a country the build-up names again
+      opening ? anchorHookSlot(opening, question, f) : hookSlot(c, 'map_fill'),
+      // The rank strip already opens on a famous country, so it never gets the guess beat too.
+      config.guessBeat && !opening ? guessSlot(c, 5, (iso) => `zoom_to:${iso}`) : undefined, // never a country the build-up names again
       medianSlot(c, 'map_fill'),
       ...contenderSlots(c, 5, (iso) => `highlight:${iso}`),
       revealSlot(c),
@@ -367,7 +371,7 @@ export function lineProblem(line: unknown, s: Slot, topName: string): string | u
   if (s.role === 'fixed') return 'fixed line';
   if (typeof line !== 'string' || !line.trim()) return 'empty';
   const w = wordCount(line);
-  if (w > (s.role === 'hook' ? 10 : MAX_WORDS)) return 'too long';
+  if (w > (s.maxWords ?? (s.role === 'hook' ? 10 : MAX_WORDS))) return 'too long';
   if (s.role !== 'hook' && w < 5) return 'too short';
   if (isBanned(line)) return 'banned phrase';
   if (s.country && !line.toLowerCase().includes(s.country.toLowerCase())) return 'missing country';
@@ -381,7 +385,7 @@ export function lineProblem(line: unknown, s: Slot, topName: string): string | u
   // richest country?" asks what the line just said.
   const q = line.lastIndexOf('?');
   if (q >= 0 && must.length && !must.every((n) => numbersIn(line.slice(q + 1)).includes(n))) return 'question after the answer';
-  return undefined;
+  return s.check?.(line);
 }
 
 export function slotsUser(slots: Slot[], fixHint?: string, avoid: string[] = []): string {

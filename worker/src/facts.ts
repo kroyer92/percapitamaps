@@ -83,8 +83,9 @@ export function pickYear(values: Series['values'], allowed: Set<string>, minCoun
   return { year: years.length ? Math.max(...years) : NaN, best };
 }
 
-// Countries famous enough to be the "obvious guess" in a GUESS video.
-const FAMOUS = ['USA', 'CHN', 'JPN', 'DEU', 'RUS', 'GBR', 'FRA', 'IND', 'BRA', 'CAN', 'AUS', 'ITA', 'MEX', 'KOR', 'SAU', 'NOR', 'CHE', 'ESP', 'NZL', 'ARG'];
+// Countries famous enough to be the "obvious guess" in a GUESS video, most famous first. The rank
+// strip opening (opening.ts) also picks its country from here.
+export const FAMOUS = ['USA', 'CHN', 'JPN', 'DEU', 'RUS', 'GBR', 'FRA', 'IND', 'BRA', 'CAN', 'AUS', 'ITA', 'MEX', 'KOR', 'SAU', 'NOR', 'CHE', 'ESP', 'NZL', 'ARG'];
 
 export interface BuildInput {
   ds: CatalogEntry & { source_url?: string };

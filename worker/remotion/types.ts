@@ -13,6 +13,11 @@ export interface TimedBeat {
 
 export interface RankItem { rank: number; iso3: string; iso2?: string; name: string; value: number; display: string }
 
+// The Map Reveal opening test (from 2 Nov 2026). A rank strip video opens on one famous country,
+// zoomed in, with its rank ("America? Only 6th richest."); its badge then flies into a strip of
+// slots #1 to #5 at the top, where #1 stays a "?" until the reveal. Without it: the classic opening.
+export interface Opening { kind: 'rank_strip'; iso: string; rank: number }
+
 export interface ShortProps {
   format: Format;
   durationInFrames: number;
@@ -26,6 +31,7 @@ export interface ShortProps {
   series?: { years: number[]; countries: { iso3: string; iso2?: string; name: string; values: (number | null)[] }[]; decimals: number; prefix: string; suffix: string };
   scale?: { groups: { name: string; iso2?: string; people: number }[]; per: string };
   guess?: { options: { letter: string; iso3: string; iso2?: string; name: string; display: string }[]; answer: string };
+  opening?: Opening & { label: string }; // label: what is ranked, under the country's rank
   sourceLine: string;
   handle: string;
 }

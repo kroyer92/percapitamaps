@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs (status);
+-- Map Reveal opening test (from 2 Nov 2026): rank_strip | classic; null for other formats.
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS opening text;
 
 CREATE TABLE IF NOT EXISTS metrics (
   job_id         bigint NOT NULL REFERENCES jobs(id),

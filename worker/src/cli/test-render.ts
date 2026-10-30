@@ -1,5 +1,6 @@
 // `npm run test-render -- --concept cattle`: one full video from live data, without Telegram
-// or the database queue. Writes renders/test-<concept>.mp4 and a .qa.json report.
+// or the database queue. Writes renders/test-<concept>.mp4 and a .qa.json report. Add
+// `--opening rank_strip` for a Map Reveal with the rank strip opening (renders/test-<concept>-strip.mp4).
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { config, type Format } from '../config.js';
@@ -8,6 +9,7 @@ import { CATALOG } from '../data/catalog.js';
 import { CONCEPTS } from '../data/concepts.js';
 import { loadFacts } from '../facts.js';
 import { generateContent } from '../content.js';
+import { openingFor } from '../opening.js';
 import { unloadModels } from '../llm.js';
 import { renderShort } from '../render.js';
 import { runQa } from '../qa.js';
@@ -21,6 +23,7 @@ if (!concept) {
   process.exit(1);
 }
 const format = (arg('format') as Format) ?? concept.format;
+const wantStrip = arg('opening') === 'rank_strip';
 const spec = CATALOG.find((d) => d.id === concept.dataset)!;
 // Use the slug the dataset check found, if the database has one.
 const row = await one<{ resolved_ref: any; enabled: boolean; check_error: string }>('SELECT resolved_ref, enabled, check_error FROM datasets WHERE id = $1', [spec.id]).catch(() => undefined);
@@ -35,25 +38,28 @@ const step = (s: string) => console.log(`[${((Date.now() - t0) / 1000).toFixed(0
 step(`Concept "${key}" · ${format} · dataset ${spec.id}`);
 const facts = await loadFacts(ds, format);
 step(`Facts: ${facts.year}, ${facts.countries_count} countries, #1 ${facts.ranking[0].name} (${facts.ranking[0].display})`);
-const content = await generateContent({ question: concept.question, format, facts, twist: concept.twist, onStep: step });
+const opening = wantStrip && format === 'MAP_REVEAL' ? openingFor(facts) : undefined;
+if (wantStrip) step(opening ? `Rank strip opening on ${opening.iso} (#${opening.rank})` : 'No famous country ranks 2nd to 15th here (or not a Map Reveal), so the opening stays classic');
+const content = await generateContent({ question: concept.question, format, facts, twist: concept.twist, opening, onStep: step });
 step(`Script written: ${content.script.beats.length} beats, critic ${content.critic.verdict}`);
 content.script.beats.forEach((b, i) => console.log(`         ${i + 1}. ${b.vo}   [${b.visual}] "${b.on_screen}"`));
 await unloadModels();
 const voice = pickVoice();
-const workDir = path.join(config.rendersDir, 'jobs', `test-${key}`);
-const out = path.join(config.rendersDir, `test-${key}.mp4`);
+const name = `test-${key}${opening ? '-strip' : ''}`;
+const workDir = path.join(config.rendersDir, 'jobs', name);
+const out = path.join(config.rendersDir, `${name}.mp4`);
 let lastPct = -10;
 const res = await renderShort({
-  workDir, outFile: out, format, facts, ds, beats: content.script.beats, voice, seed: Date.now(),
+  workDir, outFile: out, format, facts, ds, beats: content.script.beats, opening: content.script.opening, voice, seed: Date.now(),
   onStep: step,
   onProgress: (p) => { const pct = Math.floor(p * 100); if (pct >= lastPct + 10) { lastPct = pct; step(`Rendering ${pct}%`); } },
 });
 step(`Rendered ${res.seconds.toFixed(1)} s with voice ${voice}`);
 step('Checking the video (the first run also downloads the speech checker, about 500 MB)');
 const qa = await runQa({ video: out, voiceTrack: path.join(workDir, 'voice.wav'), beats: res.props.beats, fps: 30, sourceLine: facts.source_line, license: facts.license, numbersOk: true, criticVerdict: content.critic.verdict, heard: res.heard });
-await fs.writeFile(path.join(config.rendersDir, `test-${key}.qa.json`), JSON.stringify({ concept: key, title: content.packaging.title, hooks: content.hooks, qa }, null, 2));
+await fs.writeFile(path.join(config.rendersDir, `${name}.qa.json`), JSON.stringify({ concept: key, title: content.packaging.title, hooks: content.hooks, qa }, null, 2));
 step('QA:');
 for (const c of qa.checks) console.log(`         ${c.status.toUpperCase().padEnd(4)} ${c.name}: ${c.detail}`);
 console.log(`\n${qa.passed ? 'PASSED' : 'FAILED'}. Title: ${content.packaging.title}`);
-console.log(`\nTo watch it on your phone, run these two lines on the server:\n  cd /opt/percapita && cp renders/test-${key}.mp4 public/\n  echo https://${config.mediaDomain}/test-${key}.mp4\nThen delete the copy with: rm public/test-${key}.mp4`);
+console.log(`\nTo watch it on your phone, run these two lines on the server:\n  cd /opt/percapita && cp renders/${name}.mp4 public/\n  echo https://${config.mediaDomain}/${name}.mp4\nThen delete the copy with: rm public/${name}.mp4`);
 await pool.end();

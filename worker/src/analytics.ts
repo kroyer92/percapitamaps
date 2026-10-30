@@ -169,12 +169,12 @@ async function igInsights(jobId: number): Promise<IgInsights | null> {
   return res;
 }
 
-type JobInfo = { id: number; title: string | null; hook_type: string | null; script: { beats: Beat[] } | null; render: { clips: VoiceClip[]; seconds: number } | null; youtube_video_id: string };
+type JobInfo = { id: number; title: string | null; hook_type: string | null; opening: string | null; script: { beats: Beat[] } | null; render: { clips: VoiceClip[]; seconds: number } | null; youtube_video_id: string };
 
 // Scores a fresh snapshot against the bands and the channel's other videos, saves the verdict and
 // tells you in Telegram what to change. Winners get a follow-up button.
 async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = false): Promise<void> {
-  const job = (await q<JobInfo>(`SELECT id, packaging->>'title' AS title, hook_type, script, render, youtube_video_id FROM jobs WHERE id = $1`, [jobId]))[0];
+  const job = (await q<JobInfo>(`SELECT id, packaging->>'title' AS title, hook_type, opening, script, render, youtube_video_id FROM jobs WHERE id = $1`, [jobId]))[0];
   const snap = (await q<Snapshot>('SELECT * FROM metrics WHERE job_id = $1 AND win = $2', [jobId, win]))[0];
   if (!job || !snap) return;
   const peers = await q<Snapshot>(
@@ -197,10 +197,10 @@ const VERDICT: Record<Score['verdict'], string> = { winner: '🏆 Winner', avera
 const g = (x?: Grade) => (x ? ` (${x})` : '');
 const n1 = (x?: number) => (x === undefined ? '–' : x >= 10 ? String(Math.round(x)) : x.toFixed(1));
 
-export function scoreText(job: Pick<JobInfo, 'id' | 'title' | 'youtube_video_id'>, win: string, s: Snapshot, sc: Score, late = false): string {
+export function scoreText(job: Pick<JobInfo, 'id' | 'title' | 'youtube_video_id'> & { opening?: string | null }, win: string, s: Snapshot, sc: Score, late = false): string {
   const v = sc.values;
   const lines = [
-    `📊 <b>#${job.id} · ${win}</b>${late ? ' (caught up)' : ''} · ${esc(job.title ?? '')}`,
+    `📊 <b>#${job.id} · ${win}</b>${late ? ' (caught up)' : ''} · ${esc(job.title ?? '')}${job.opening ? ` · ${OPENING_LABEL[job.opening] ?? job.opening} opening` : ''}`,
     `${VERDICT[sc.verdict]}: ${esc(sc.reason)}`,
     `<b>YouTube</b> ${(v.views ?? 0).toLocaleString('en-US')} views · stayed ${n1(v.stay)}%${g(sc.grades.stay)} · watched ${n1(v.finish)}%${g(sc.grades.finish)} · ${n1(v.shares)} shares/1k${g(sc.grades.shares)} · ${n1(v.subs)} subs/1k${g(sc.grades.subs)}`,
   ];
@@ -218,6 +218,50 @@ function median(xs: number[]): number {
   const s = [...xs].sort((a, b) => a - b);
   const m = Math.floor(s.length / 2);
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+// The Map Reveal opening test (opening.ts): "stayed" (engaged views ÷ views) at 72 h, rank strip
+// against classic. It is read once both openings have 5 videos with 72 h numbers; before that,
+// topic luck moves the medians more than an opening can, so the answer is "too early". Then a
+// lead of 10 points or more decides it.
+const OPENING_MIN = 5;
+const OPENING_BAR = 10; // points of "stayed"
+const OPENING_LAG_DAYS = 5; // the 72 h window, plus YouTube Analytics running 2–3 days behind
+const OPENING_LABEL: Record<string, string> = { rank_strip: 'rank strip', classic: 'classic' };
+
+export interface OpeningArm { key: string; label: string; n: number; median: number | null; pending: number; due: number | null }
+export interface OpeningTest { arms: OpeningArm[]; ready: boolean; lead: number | null; min: number; bar: number; lines: string[] }
+
+export async function openingTest(): Promise<OpeningTest> {
+  const rows = await q<{ opening: string; at: Date | null; views: number | null; engaged: number | null }>(
+    `SELECT j.opening, COALESCE(j.published_at, j.slot_at) AS at, m.views, m.engaged_views AS engaged
+     FROM jobs j LEFT JOIN metrics m ON m.job_id = j.id AND m.win = '72h'
+     WHERE j.format = 'MAP_REVEAL' AND j.opening IS NOT NULL AND j.status IN ('approved', 'published')`);
+  const day = (d: Date) => new Intl.DateTimeFormat('en-GB', { timeZone: config.localTz, weekday: 'short', day: 'numeric', month: 'short' }).format(d);
+  const arms = ['rank_strip', 'classic'].map((key): OpeningArm => {
+    const mine = rows.filter((r) => r.opening === key);
+    const measured = mine.filter((r) => r.views && r.engaged !== null);
+    const stays = measured.map((r) => Math.min(100, (r.engaged! / r.views!) * 100));
+    // When the last of the 5 should have its numbers, if enough videos are already out or booked.
+    const pending = mine.filter((r) => !measured.includes(r) && r.at).map((r) => +new Date(r.at!)).sort((a, b) => a - b);
+    const short = OPENING_MIN - stays.length;
+    const due = short > 0 && pending.length >= short ? pending[short - 1] + OPENING_LAG_DAYS * 86_400_000 : null;
+    return { key, label: OPENING_LABEL[key][0].toUpperCase() + OPENING_LABEL[key].slice(1), n: stays.length, median: stays.length ? median(stays) : null, pending: pending.length, due };
+  });
+  const [strip, classic] = arms;
+  const ready = arms.every((a) => a.n >= OPENING_MIN);
+  const lead = strip.median !== null && classic.median !== null ? strip.median - classic.median : null;
+  const pct = (x: number | null) => (x === null ? '–' : `${Math.round(x)}%`);
+  const lines = arms.map((a) => `${a.label}: ${a.n} of ${OPENING_MIN} videos measured${a.pending ? ` (${a.pending} more out or booked)` : ''} · median stayed ${pct(a.median)}`);
+  if (!ready) {
+    const missing = arms.filter((a) => a.n < OPENING_MIN && !a.due);
+    lines.push(`⏳ Too early to read: each opening needs ${OPENING_MIN} Map Reveal videos with 72 h numbers. ${missing.length
+      ? `${missing.map((a) => `${a.label} needs ${OPENING_MIN - a.n - a.pending} more made`).join(', ')} first.`
+      : `They should all be in around ${day(new Date(Math.max(...arms.map((a) => a.due ?? 0))))}.`} Keep both openings as they are until then.`);
+  } else if (lead! >= OPENING_BAR) lines.push(`✅ The rank strip keeps ${Math.round(lead!)} points more viewers. Make it the only opening: MR_OPENING=rank_strip in .env.`);
+  else if (lead! <= -OPENING_BAR) lines.push(`🔻 The rank strip keeps ${Math.round(-lead!)} points fewer viewers. Go back to classic: MR_OPENING=classic in .env.`);
+  else lines.push(`No clear winner (${lead! >= 0 ? '+' : ''}${Math.round(lead!)} points; it takes ${OPENING_BAR}). Keep alternating until each opening has 10 videos.`);
+  return { arms, ready, lead, min: OPENING_MIN, bar: OPENING_BAR, lines };
 }
 
 export async function weeklyReport(): Promise<string> {
@@ -244,6 +288,7 @@ async function weeklyReportInner(): Promise<string> {
      GROUP BY 1 ORDER BY 2 DESC`);
   const verdictLine = verdicts.map((v) => `${v.verdict} ${v.n}`).join(' · ') || 'none scored yet';
   const tuneLines = await autoTune().catch((e) => [`Auto-tuning failed: ${esc(String(e.message ?? e))}`]);
+  const opening = await openingTest().catch((e) => ({ lines: [`Could not read the test: ${String(e.message ?? e)}`] }));
   const sorted = [...rows].sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
   const cut = sorted[Math.max(0, Math.floor(sorted.length * 0.2) - 1)]?.views ?? Infinity;
   const line = (r: (typeof rows)[number]) => `#${r.id} ${esc(r.title ?? '')} · ${(r.views ?? 0).toLocaleString('en-US')} views${r.avg_view_pct ? ` · ${Math.round(r.avg_view_pct)}% viewed` : ''} (${r.win})${(r.views ?? 0) >= cut ? ' 🏆' : ''}`;
@@ -260,6 +305,7 @@ async function weeklyReportInner(): Promise<string> {
     '', '<b>By voice</b>', group('voice'),
     group('hook_type') ? `\n<b>By hook type</b>\n${group('hook_type')}` : '',
     group('length_band') ? `\n<b>By length</b>\n${group('length_band')}` : '',
+    '', '<b>Map Reveal opening test</b> (stayed at 72 h)', ...opening.lines.map(esc),
     '', '<b>Next in the queue</b>', ...ideas.map((i) => `· ${esc(i.question)} (${i.format}${i.source !== 'discover' ? `, ${i.source}` : ''})`),
     '', '<b>Verdicts</b>', verdictLine,
     '', '<b>Auto-tuning</b>', ...tuneLines,

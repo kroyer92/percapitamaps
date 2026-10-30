@@ -3,6 +3,8 @@ import path from 'node:path';
 import { config } from './config.js';
 import { lastJsonLine, run } from './lib/proc.js';
 
+const ORDINALS = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth'];
+
 // Spell out what the voice engine would otherwise misread.
 export function speakable(text: string): string {
   return text
@@ -30,6 +32,8 @@ export function speakable(text: string): string {
     // "3.53" -> "3 point 5 3"; the voice drops the dot otherwise.
     .replace(/(\d)\.(\d+)/g, (_m, a, b) => `${a} point ${b.split('').join(' ')}`)
     .replace(/#(\d+)/g, 'number $1')
+    // "6th" (the rank strip hook, "America? Only 6th richest.") -> "sixth".
+    .replace(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi, (m, n) => ORDINALS[Number(n)] || m)
     .replace(/\bvs\.?\b/gi, 'versus')
     .replace(/\s+/g, ' ')
     .trim();

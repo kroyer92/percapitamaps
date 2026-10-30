@@ -100,7 +100,7 @@ Setup on the server, once:
 ## Telegram
 
 Buttons on each preview: Approve, Reject, Hook 1–5. Commands: `/status`, `/produce [n]`,
-`/link <job> <url>`, `/followup <job or url>`, `/tune [on|off|reset]`, `/help`.
+`/link <job> <url>`, `/followup <job or url>`, `/tune [on|off|reset]`, `/opening`, `/help`.
 
 ## Automatic analysis
 
@@ -117,6 +117,14 @@ the worker adds the Instagram Reel's insights, and `worker/src/scorecard.ts` sco
 - **Sunday auto-tuning** (`worker/src/tune.ts`): HOOK_TEST and LENGTH_TEST options that earn more
   engaged views get picked more often, at most 20 points a week, never under 10%. `/tune off`
   goes back to the plain rotation, `/tune reset` to even weights.
+- **Map Reveal opening test** (from 2 Nov 2026, `worker/src/opening.ts`): every other Map Reveal
+  opens on a famous country ranked 2nd to 15th ("America? Only 6th richest."), whose rank flies into
+  a strip of slots #1 to #5 where #1 stays "?" until the reveal; the rest keep the classic opening.
+  Topics without such a country, and rank strip videos moved to another hook, sit the test out.
+  `/opening`, the weekly report and the Studio lab compare stayed at 72 h, and say "too early" until
+  each opening has 5 measured videos; then a lead of 10 points decides. `MR_OPENING=rank_strip` or
+  `classic` in `.env` gives every Map Reveal one opening. Try it with
+  `docker compose exec render-worker npm run test-render -- --concept cattle --opening rank_strip`.
 - **Weekly export for Claude** (`ANALYSIS_EXPORT=on`, `ANALYSIS_EXPORT_TOKEN` of 24+ random
   characters): writes `public/analysis/<token>.json`. Keep it off until the YouTube API audit is
   approved and `privacy.md` allows it.
