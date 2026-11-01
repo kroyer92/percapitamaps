@@ -14,6 +14,7 @@ n8n (schedules, YouTube credentials)          render-worker (this repo, worker/)
   WF3 Approved upload (after API audit) ◄──  you tap Approve in Telegram
   WF4 Instagram hourly ───────────────────►  POST /instagram/run
   WF5 Analyze   every 6 h, Sun 18:00 ─────►  /analytics/due, /analytics/snapshot, /report/weekly
+  WF6 Comments  hourly at :40 ────────────►  POST /comments/youtube   new comments → checked reply → Telegram
   WF0 Errors    any failure → Telegram
 ```
 
@@ -131,6 +132,29 @@ the worker adds the Instagram Reel's insights, and `worker/src/scorecard.ts` sco
 
 Instagram insights need the `instagram_business_manage_insights` permission on the token; without
 it the message says so and only YouTube is scored.
+
+## Comment replies
+
+Every hour WF6 reads the newest 100 comment threads on the channel (and all replies in busy
+threads, such as the pinned comment) and hands them to the worker. For each comment nobody from
+the channel has answered yet, Telegram gets one message: the comment, the one thing to do, and
+the reply text to paste (tap the grey text to copy it, then "Open the comment"). At most 8 per
+run (`COMMENTS_PER_RUN`), newest first; the rest come an hour later. Instagram comments on the
+cross-posted Reels come the same way when the token may read them.
+
+- **Numbers only from the video's own data.** A comment that names countries ("what about
+  Vietnam?", "as a German…", "I guessed Qatar") gets their rank and value from the same ranking
+  the video showed, in Niko's format: opener, `Same World Bank data (2024): …`, highest first,
+  then the US (or the world median) to compare, no final full stop. A country missing from the
+  data gets "isn't in this 2024 data", never a guess. Try it on the server:
+  `docker compose exec render-worker npm run comments-try -- wb_100_dollars "What about Vietnam?"`
+- **Critical or political comments** get "Fair point." and one neutral line on what the map
+  counts, no rebuttal. Praise: "Heart it. No reply needed." Spam: remove it.
+- **The model only sorts.** The VPS model (Ollama) labels each comment and may word a reply to a
+  general question; a reply with any number that is not in the video's facts, an emoji or a
+  promise of a future video is thrown away for a fixed one. Comments never go to Gemini or Groq
+  (YouTube API data stays on the server), and rows in `comments` are deleted after 30 days.
+- **Nothing is posted.** Replies stay manual until the YouTube API audit is approved.
 
 ## Licenses of what it uses
 

@@ -1,4 +1,4 @@
-// Generates the six importable n8n workflows in n8n/workflows/. Run: node n8n/build-workflows.mjs
+// Generates the seven importable n8n workflows in n8n/workflows/. Run: node n8n/build-workflows.mjs
 // The workflows are thin: schedules and API calls with n8n's stored credentials.
 // All the logic lives in the render worker (http://render-worker:8080).
 import fs from 'node:fs';
@@ -173,6 +173,42 @@ wfs.push(workflow('wf5', 'WF5 Analyze', [
   link('Shorts views by day', 'Long-form watch time'), link('Long-form watch time', 'Bundle channel totals'), link('Bundle channel totals', 'Save channel totals'),
   link('Every 6 hours', 'Videos due'), link('Run manually', 'Videos due'), link('Videos due', 'Views and likes'),
   link('Views and likes', 'Retention'), link('Retention', 'Retention curve'), link('Retention curve', 'Bundle snapshot'), link('Bundle snapshot', 'Save snapshot'), link('Sunday 18:00 UTC', 'Weekly report'),
+], errorWf));
+
+// WF6: new viewer comments every hour. n8n only reads (with the YouTube credential WF5 uses); the
+// worker drafts a fact-checked reply for each new comment and sends it to Telegram. Nothing is posted.
+// Quota: about 3 units an hour (channel id 1, threads 1, one more per thread with over 5 replies).
+const yt = (wf, name, url, pos, extra = {}) => node(wf, name, 'n8n-nodes-base.httpRequest', 4.2, pos, {
+  url, authentication: 'predefinedCredentialType', nodeCredentialType: 'youTubeOAuth2Api', options: {},
+}, { ...retry, ...extra });
+wfs.push(workflow('wf6', 'WF6 Comments', [
+  schedule('wf6', 'Every hour', '40 * * * *', [0, 0]),
+  manual('wf6', [0, 180]),
+  yt('wf6', 'My channel', 'https://www.googleapis.com/youtube/v3/channels?part=id&mine=true', [240, 80]),
+  yt('wf6', 'Recent comment threads',
+    "=https://www.googleapis.com/youtube/v3/commentThreads?part=snippet,replies&allThreadsRelatedToChannelId={{ $json.items[0].id }}&maxResults=100&order=time&textFormat=plainText", [480, 80]),
+  // The thread list carries at most 5 replies; fetch the rest for busy threads (often the pinned comment).
+  code('wf6', 'Threads with more replies', [720, 80], [
+    "const threads = $('Recent comment threads').first().json.items ?? [];",
+    "const busy = threads.filter((t) => (t.snippet.totalReplyCount ?? 0) > (t.replies?.comments?.length ?? 0)).slice(0, 20);",
+    "return busy.length ? busy.map((t) => ({ json: { parent_id: t.id } })) : [{ json: { parent_id: '' } }];",
+  ].join('\n')),
+  node('wf6', 'Any?', 'n8n-nodes-base.if', 2.2, [960, 80], {
+    conditions: { options: { caseSensitive: true, typeValidation: 'loose', version: 2 }, combinator: 'and',
+      conditions: [{ id: uid('wf6:if'), leftValue: '={{ $json.parent_id }}', rightValue: '', operator: { type: 'string', operation: 'notEmpty', singleValue: true } }] },
+    options: {},
+  }),
+  yt('wf6', 'All replies', "=https://www.googleapis.com/youtube/v3/comments?part=snippet&parentId={{ $json.parent_id }}&maxResults=100&textFormat=plainText", [1200, 0], { onError: 'continueRegularOutput' }),
+  code('wf6', 'Bundle comments', [1440, 80], [
+    "const replies = $input.all().flatMap((i) => i.json.kind === 'youtube#commentListResponse' ? i.json.items ?? [] : []);",
+    "return [{ json: { channel_id: $('My channel').first().json.items?.[0]?.id ?? '', threads: $('Recent comment threads').first().json.items ?? [], replies } }];",
+  ].join('\n')),
+  post('wf6', 'Draft replies', `${W}/comments/youtube`, [1680, 80], '={{ JSON.stringify($json) }}'),
+], [
+  link('Every hour', 'My channel'), link('Run manually', 'My channel'), link('My channel', 'Recent comment threads'),
+  link('Recent comment threads', 'Threads with more replies'), link('Threads with more replies', 'Any?'),
+  link('Any?', 'All replies', 0), link('Any?', 'Bundle comments', 1), link('All replies', 'Bundle comments'),
+  link('Bundle comments', 'Draft replies'),
 ], errorWf));
 
 fs.mkdirSync(new URL('./workflows/', import.meta.url), { recursive: true });

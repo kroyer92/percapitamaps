@@ -104,3 +104,20 @@ CREATE TABLE IF NOT EXISTS settings (
   value      jsonb,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- Viewer comments already sent to Telegram with a draft reply (comments.ts). Rows are deleted
+-- 31 days after the comment was written (privacy.md).
+CREATE TABLE IF NOT EXISTS comments (
+  platform     text NOT NULL,              -- youtube | instagram
+  id           text NOT NULL,
+  video_id     text NOT NULL,
+  job_id       bigint REFERENCES jobs(id),
+  author       text,
+  text         text,
+  published_at timestamptz NOT NULL,
+  kind         text,                       -- question | correction | critical | praise | spam | other
+  action       text,
+  reply        text,
+  sent_at      timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (platform, id)
+);

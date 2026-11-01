@@ -14,6 +14,7 @@ import { alert, say, esc } from './telegram.js';
 import { run } from './lib/proc.js';
 import * as office from './activity.js';
 import { studio } from './studio.js';
+import { checkComments } from './comments.js';
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -83,6 +84,22 @@ app.post('/analytics/channel', async (req, res) => {
   res.json({ ok: true });
 });
 app.post('/report/weekly', async (_req, res) => res.json({ text: await weeklyReport() }));
+
+// WF6: new viewer comments. Answers at once; the drafts arrive in Telegram. Runs in the work queue
+// because it may use the VPS model, which must not overlap a render.
+app.post('/comments/youtube', (req, res) => {
+  const body = req.body ?? {};
+  if (queue.status().waiting.includes('comments')) return res.status(202).json({ queued: false, reason: 'a check is already waiting' });
+  queue.add('comments', async () => {
+    try {
+      await checkComments(body);
+    } catch (e: any) {
+      console.error('[comments] failed:', e);
+      await alert(`Comment check failed: ${e.message}`);
+    }
+  });
+  res.status(202).json({ queued: true, threads: Array.isArray(body.threads) ? body.threads.length : 0 });
+});
 
 // The office page (Caddy puts it at STUDIO_DOMAIN behind a password).
 app.use('/studio', studio);

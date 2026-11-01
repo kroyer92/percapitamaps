@@ -177,6 +177,20 @@ export async function chatJson<T>(o: ChatOpts): Promise<T> {
   throw new Error(errors.join(' | ') || 'no language model configured (LLM_PROVIDERS)');
 }
 
+// The VPS model only, never a hosted API: for data that must stay on the server (viewer comments
+// read through the YouTube API, see privacy.md). OLLAMA_URL first, OLLAMA_FALLBACK_URL if it is down.
+export async function chatLocalJson<T>(o: ChatOpts): Promise<T> {
+  const errors: string[] = [];
+  for (const base of new Set([config.ollamaUrl, config.ollamaFallbackUrl])) {
+    try {
+      return parseJson<T>(await chatAt(base, o));
+    } catch (e: any) {
+      errors.push(e?.message ?? String(e));
+    }
+  }
+  throw new Error(errors.join(' | '));
+}
+
 export function parseJson<T>(text: string): T {
   const cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
   try {
