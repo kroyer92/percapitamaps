@@ -112,8 +112,14 @@ the worker adds the Instagram Reel's insights, and `worker/src/scorecard.ts` sco
   and share rate. Bands follow the per-video metric targets doc until 10 videos have the same
   snapshot, then the channel's own bottom 20% / median / top 20%.
 - **Telegram message per snapshot:** Winner / Average / Loser / Too early, the steepest 2-second
-  drop in the retention curve and the script beat on screen then, and one fix for the first stage
-  that misses. Winners get a "Make 2 follow-ups" button.
+  drop in the retention curve and the script beat on screen then, why it scored that way, and a
+  closing **Your move** line: the exact action, or "nothing for you to do" with the reason and the
+  date of the next scorecard. One video never changes the recipe, and nothing touches what a running
+  test measures. Winners get 2 follow-ups queued automatically (once per video).
+- **Sunday report** opens with **Your move** (exact /link lines, a tap, or "Nothing this week"),
+  **Done for you** and **Waiting on data**, then a channel call: the first funnel stage most
+  measured videos fail (5+ videos with 300+ views), which either waits on the running test or says
+  to forward the report to Claude for the code change.
 - **Sunday auto-tuning** (`worker/src/tune.ts`): HOOK_TEST and LENGTH_TEST options that earn more
   engaged views get picked more often, at most 20 points a week, never under 10%. `/tune off`
   goes back to the plain rotation, `/tune reset` to even weights.
@@ -122,8 +128,10 @@ the worker adds the Instagram Reel's insights, and `worker/src/scorecard.ts` sco
   a strip of slots #1 to #5 where #1 stays "?" until the reveal; the rest keep the classic opening.
   Topics without such a country, and rank strip videos moved to another hook, sit the test out.
   `/opening`, the weekly report and the Studio lab compare stayed at 72 h, and say "too early" until
-  each opening has 5 measured videos; then a lead of 10 points decides. `MR_OPENING=rank_strip` or
-  `classic` in `.env` gives every Map Reveal one opening. Try it with
+  each opening has 5 measured videos; then a lead of 10 points decides, or, without one, whichever
+  is ahead at 10 videos each. With a verdict the message carries a "Use … only" button that applies
+  it (settings key `mr_opening`, no restart). `MR_OPENING=rank_strip` or `classic` in `.env` also
+  gives every Map Reveal one opening. Try it with
   `docker compose exec render-worker npm run test-render -- --concept cattle --opening rank_strip`.
 - **Weekly export for Claude** (`ANALYSIS_EXPORT=on`, `ANALYSIS_EXPORT_TOKEN` of 24+ random
   characters): writes `public/analysis/<token>.json`. Keep it off until the YouTube API audit is

@@ -1,6 +1,6 @@
 // Scores one analytics snapshot: a grade per stage (stay, finish, spread, convert), a verdict,
-// where in the video viewers left, and what to change. The bands are the ones in the "per-video
-// metric targets" doc; once 10 videos have the same snapshot, the channel's own spread replaces them.
+// where in the video viewers left, why, and what has to happen next (nextStep). The bands are the
+// ones in the "per-video metric targets" doc; once 10 videos have the same snapshot, the channel's own spread replaces them.
 import type { Beat } from './validate.js';
 import type { VoiceClip } from './voice.js';
 import { place } from './timeline.js';
@@ -49,7 +49,7 @@ export interface Score {
   grades: Record<string, Grade | undefined>;
   relative?: number; // engaged views ÷ the channel median at the same snapshot
   drop?: Drop;
-  fixes: string[];
+  why: string[];
   peers: number;
 }
 
@@ -144,26 +144,60 @@ export function biggestDrop(curve: [number, number][] | null, v: VideoInfo): Dro
   return { ...best, beat, line: words.slice(0, 7).join(' ') + (words.length > 7 ? '…' : ''), kind };
 }
 
-// The hook types prompts.ts asks for; a failing one hands over to the next.
-const NEXT_HOOK: Record<string, string> = { STAKES: 'CONTRADICTION', CONTRADICTION: 'RANK_TEASE', RANK_TEASE: 'YOU', YOU: 'DIRECT_QUESTION', DIRECT_QUESTION: 'STAKES' };
-
-function fixesFor(g: Score['grades'], drop: Drop | undefined, hookType: string | null): string[] {
+// What went wrong, in plain words. These describe the video; they are not jobs for anyone; the
+// action line (nextStep) says what, if anything, has to happen.
+function whyFor(g: Score['grades'], drop: Drop | undefined): string[] {
   const bad = (x?: Grade) => x === 'kill' || x === 'weak';
   const out: string[] = [];
-  if (bad(g.stay)) {
-    out.push(`Viewers swipe in the first second. Keep frame 0 coloured and moving with the hook text already on screen, and make sure the title says the same thing as the first line.${hookType && NEXT_HOOK[hookType] ? ` This one used a ${hookType} hook; tap ${NEXT_HOOK[hookType]} on the next preview if it is offered.` : ''}`);
-  } else if (bad(g.finish)) {
-    if (drop?.kind === 'hook') out.push('People leave during the opening line: cut it to 9 words or fewer and show the map change on the first word.');
-    else if (drop?.kind === 'reveal') out.push('People leave just before the payoff: reveal the #1 by about 70% of the runtime, and keep amber hidden until then.');
-    else if (drop) out.push(`Cut or shorten beat ${drop.beat + 1} ("${drop.line}"). Keep it to 2 contenders and 28–32 s in total.`);
-    else out.push('The middle drags. Keep it to 2 contenders, 28–32 s in total, and a visual change every 2–3 s.');
-  } else if (bad(g.shares)) {
-    out.push('People watch but don\'t send it on. Pick topics with a surprising #1 or a neighbour rivalry, and end on a contrast worth sending.');
-  } else if (bad(g.subs)) {
-    out.push('People don\'t subscribe. Make the series obvious: series name in the title and the "new map every day" end card.');
-  }
-  if (bad(g.ig_skip) && !bad(g.stay)) out.push('Instagram skips more than YouTube does because Reels often start muted. The hook has to read without sound, so use a big caption at frame 0.');
+  if (bad(g.stay)) out.push('Most viewers swiped away in the first second.');
+  else if (bad(g.finish)) {
+    if (drop?.kind === 'hook') out.push('Viewers stayed for the first frame but left during the opening line.');
+    else if (drop?.kind === 'reveal') out.push('Viewers left just before the #1 was revealed.');
+    else if (drop) out.push(`Viewers left at beat ${drop.beat + 1} ("${drop.line}").`);
+    else out.push('Viewers drifted off through the middle.');
+  } else if (bad(g.shares)) out.push('People watched it but hardly anyone shared it.');
+  else if (bad(g.subs)) out.push('People watched it but few subscribed.');
+  if (bad(g.ig_skip) && !bad(g.stay)) out.push('On Instagram more people skipped it than on YouTube (Reels often start muted).');
   return out;
+}
+
+export const STAGE_NAME: Record<string, string> = { stay: 'the first second (stayed)', finish: 'watch-through', shares: 'shares', subs: 'subscribers' };
+
+// Everything nextStep needs besides the score itself.
+export interface StepContext {
+  win: string;
+  next?: { win: string; at: string }; // the next scorecard for this video, if any
+  followups?: 'queued' | 'already';
+  openingTest?: { decided: boolean; readBy: string | null }; // the Map Reveal opening test
+}
+
+// The last line of every scorecard: the verdict turned into what has to happen, which is almost
+// always nothing on Niko's side. One video never changes the recipe: topic luck moves a single
+// video more than any change does, and the opening test must run untouched until it is read.
+export function nextStep(sc: Score, ctx: StepContext): string {
+  const bad = (x?: Grade) => x === 'kill' || x === 'weak';
+  const nextCard = ctx.next ? ` Next scorecard for it: ${ctx.next.win}, around ${ctx.next.at}.` : '';
+  if (sc.verdict === 'winner') {
+    return ctx.followups === 'already'
+      ? `✅ Nothing for you to do. Its 2 follow-ups are already queued.${nextCard}`
+      : `✅ Nothing for you to do. I'm queuing 2 follow-ups in the same story shape; approve their previews as usual.${nextCard}`;
+  }
+  if (sc.verdict === 'early') {
+    return `⏳ Nothing for you to do. ${sc.values.views ?? 0} views is too few to judge (${MIN_SAMPLE} needed).${nextCard}`;
+  }
+  const parts = ['✅ Nothing for you to do.'];
+  if (bad(sc.grades.stay)) {
+    const t = ctx.openingTest;
+    parts.push(t && !t.decided
+      ? `The weak first second is the known channel-wide problem, and the Map Reveal opening test is the fix being tried. Nothing changes until it is read${t.readBy ? ` (around ${t.readBy})` : ''}; changing things now would spoil it.`
+      : 'The weak first second is the known channel-wide problem; the Sunday report says when there is enough data for the next fix.');
+  } else if (sc.verdict === 'average' && !['finish', 'shares', 'subs'].some((k) => bad(sc.grades[k]))) {
+    parts.push('It is on target.');
+  } else {
+    parts.push('One video is too little to change anything on. If the same weakness shows across videos, the Sunday report says so and what changes.');
+  }
+  if (sc.verdict === 'loser') parts.push("Leave it up: don't delete or re-upload it.");
+  return parts.join(' ') + nextCard;
 }
 
 export function score(s: Snapshot, v: VideoInfo, peers: Snapshot[]): Score {
@@ -201,5 +235,5 @@ export function score(s: Snapshot, v: VideoInfo, peers: Snapshot[]): Score {
   } else {
     verdict = 'average'; reason = anyKill ? 'a stage is failing' : stages.includes('weak') ? 'nothing failing, but below target in places' : 'on target, nothing standing out';
   }
-  return { verdict, reason, values, grades, relative, drop, fixes: fixesFor(grades, drop, v.hook_type), peers: peers.length };
+  return { verdict, reason, values, grades, relative, drop, why: whyFor(grades, drop), peers: peers.length };
 }
