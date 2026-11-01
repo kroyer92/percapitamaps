@@ -8,6 +8,7 @@ import { ig, igToken } from './publish.js';
 import { score, mmss, nextStep, quantile, MIN_SAMPLE, STAGE_NAME, type Grade, type IgInsights, type Score, type Snapshot, type StepContext, type VideoInfo } from './scorecard.js';
 import { autoFollowup, hasFollowups, queueFollowup } from './followups.js';
 import type { Keyboard } from './telegram.js';
+import { isCurrent, versionOf, versionName } from './changes.js';
 import { autoTune, getTune } from './tune.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -180,7 +181,7 @@ type JobInfo = { id: number; title: string | null; hook_type: string | null; ope
 // tells you in Telegram what it means and what (if anything) has to happen. Winners get their
 // follow-ups queued automatically.
 async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = false): Promise<void> {
-  const job = (await q<JobInfo & { format: string; published_at: Date | null }>(`SELECT id, packaging->>'title' AS title, hook_type, opening, format, published_at, script, render, youtube_video_id FROM jobs WHERE id = $1`, [jobId]))[0];
+  const job = (await q<JobInfo & { format: string; published_at: Date | null; created_at: Date }>(`SELECT id, packaging->>'title' AS title, hook_type, opening, format, published_at, created_at, script, render, youtube_video_id FROM jobs WHERE id = $1`, [jobId]))[0];
   const snap = (await q<Snapshot>('SELECT * FROM metrics WHERE job_id = $1 AND win = $2', [jobId, win]))[0];
   if (!job || !snap) return;
   const peers = await q<Snapshot>(
@@ -205,7 +206,8 @@ async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = f
   if (sc.verdict === 'winner') ctx.followups = await autoFollowup(jobId).catch(() => undefined);
   const t = await openingTest().catch(() => undefined);
   if (t) ctx.openingTest = { decided: !!t.decided, readBy: t.readBy };
-  await say(scoreText(job, win, snap, sc, late, nextStep(sc, ctx)));
+  const made = isCurrent(job.format, job.created_at) ? null : `Made with an earlier version (${versionName(versionOf(job.format, job.created_at))}), so it shows how that version did, not what to change now.`;
+  await say(scoreText(job, win, snap, sc, late, [made, nextStep(sc, ctx)].filter(Boolean).join(' ')));
 }
 
 const VERDICT: Record<Score['verdict'], string> = { winner: '🏆 Winner', average: '🙂 Average', loser: '🔻 Loser', early: '⏳ Too early' };
@@ -341,16 +343,20 @@ export async function weeklyReport(): Promise<string> {
 const CHANNEL_MIN = 5;
 export interface ChannelCall { kind: 'wait' | 'ok' | 'change'; text: string }
 
-export function channelCall(grades: Record<string, Grade | undefined>[], opening: Pick<OpeningTest, 'decided' | 'readBy'> | undefined): ChannelCall {
-  const graded = grades.filter((g) => g.stay !== undefined);
+export interface CallVideo { grades: Record<string, Grade | undefined>; current: boolean }
+
+export function channelCall(videos: CallVideo[], opening: Pick<OpeningTest, 'decided' | 'readBy'> | undefined): ChannelCall {
+  // Only videos made with the current recipe of their format can say what to change next.
+  const old = videos.filter((v) => !v.current && v.grades.stay !== undefined).length;
+  const graded = videos.filter((v) => v.current).map((v) => v.grades).filter((g) => g.stay !== undefined);
   if (graded.length < CHANNEL_MIN) {
-    return { kind: 'wait', text: `⏳ Too early for a channel-wide call: ${graded.length} of ${CHANNEL_MIN} videos have ${MIN_SAMPLE}+ views. Nothing for you to do; it comes on its own as views grow.` };
+    return { kind: 'wait', text: `⏳ Too early for a channel-wide call: ${graded.length} of ${CHANNEL_MIN} videos made since the last change to their format have ${MIN_SAMPLE}+ views${old ? ` (${old} older video${old === 1 ? ' was' : 's were'} made with an earlier version, so ${old === 1 ? 'it shows' : 'they show'} how that version did, not what to change now)` : ''}. Nothing for you to do; it comes on its own as views grow.` };
   }
   const bad = (x?: Grade) => x === 'kill' || x === 'weak';
   const failing = ['stay', 'finish', 'shares', 'subs'].find((k) => graded.filter((g) => bad(g[k])).length * 2 > graded.length);
-  if (!failing) return { kind: 'ok', text: `✅ On target across ${graded.length} measured videos. Nothing to change and nothing for you to do.` };
+  if (!failing) return { kind: 'ok', text: `✅ On target across ${graded.length} videos made with the current version. Nothing to change and nothing for you to do.` };
   const count = graded.filter((g) => bad(g[failing])).length;
-  const share = `${count} of ${graded.length} measured videos are weak on ${STAGE_NAME[failing]}`;
+  const share = `${count} of ${graded.length} videos made with the current version are weak on ${STAGE_NAME[failing]}`;
   if (failing === 'stay' && !opening?.decided) {
     return { kind: 'wait', text: `⏳ ${share}. That is what the Map Reveal opening test is fixing, so nothing changes until it is read${opening?.readBy ? ` (around ${opening.readBy})` : ''}. Nothing for you to do.` };
   }
@@ -392,7 +398,25 @@ async function weeklyReportInner(): Promise<string> {
   const winners = rows.filter((r) => r.score?.verdict === 'winner');
   const queued: number[] = [];
   for (const w of winners) if (!(await hasFollowups(w.id))) { await queueFollowup(w.id, true).catch(() => undefined); queued.push(w.id); }
-  const call = channelCall(rows.filter((r) => r.win !== '24h' && r.score).map((r) => r.score!.grades), opening);
+  // Every measured video of the last 90 days, old ones included, each tagged with the version
+  // (changes.ts) it was made with.
+  const history = await q<{ id: number; format: string; made: Date; win: string; score: Score | null; views: number | null; engaged: number | null; apv: number | null }>(
+    `SELECT DISTINCT ON (j.id) j.id, j.format, j.created_at AS made, m.win, m.score, m.views, m.engaged_views AS engaged, m.avg_view_pct AS apv
+     FROM jobs j JOIN metrics m ON m.job_id = j.id
+     WHERE j.published_at > now() - interval '90 days' AND m.win IN ('72h','7d')
+     ORDER BY j.id, CASE m.win WHEN '7d' THEN 1 ELSE 2 END`);
+  const call = channelCall(history.filter((r) => r.score).map((r) => ({ grades: r.score!.grades ?? {}, current: isCurrent(r.format, r.made) })), opening);
+  const byVersion = new Map<string, { stay: number[]; apv: number[]; n: number }>();
+  for (const r of history) {
+    const k = `${FORMAT_NAMES[r.format as Format] ?? r.format} · ${versionName(versionOf(r.format, r.made))}${isCurrent(r.format, r.made) ? ' (current)' : ''}`;
+    const b = byVersion.get(k) ?? { stay: [], apv: [], n: 0 };
+    b.n++;
+    if (r.views && r.views >= MIN_SAMPLE && r.engaged !== null) b.stay.push(Math.min(100, (r.engaged / r.views) * 100));
+    if (r.apv !== null) b.apv.push(r.apv);
+    byVersion.set(k, b);
+  }
+  const versionLines = [...byVersion.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, b]) =>
+    `${esc(k)}: ${b.n} video${b.n === 1 ? '' : 's'} · median stayed ${b.stay.length ? `${Math.round(median(b.stay))}%` : '–'}${b.stay.length < b.n ? ` (${b.stay.length} with ${MIN_SAMPLE}+ views)` : ''} · watched ${b.apv.length ? `${Math.round(median(b.apv))}%` : '–'}`);
 
   // The top of the report: what Niko has to do, what was done for him, and what waits on data.
   const yours: string[] = [];
@@ -425,6 +449,7 @@ async function weeklyReportInner(): Promise<string> {
     `<b>Done for you:</b> ${done.join(' ')}`,
     ...(waiting.length ? [`<b>Waiting on data:</b> ${esc(waiting.join(' '))}`] : []),
     '', '<b>Channel call</b>', esc(call.text),
+    ...(versionLines.length ? ['', '<b>By version</b> (all videos of the last 90 days, at 72 h or 7 d)', ...versionLines] : []),
     '', '<b>Map Reveal opening test</b> (stayed at 72 h)', ...(opening?.lines ?? ['Could not read the test this week; it is retried next Sunday.']).map(esc),
     '', '<b>Top 5</b>', ...sorted.slice(0, 5).map(line),
     ...(sorted.length > 5 ? ['', '<b>Bottom 5</b>', ...sorted.slice(-5).reverse().map(line)] : []),
