@@ -6,6 +6,7 @@ import { chatJson, embed, unloadModels } from './llm.js';
 import * as P from './prompts.js';
 import { enabledDatasets, type DatasetRow } from './datasets.js';
 import { working } from './activity.js';
+import { HIGH_END } from './data/catalog.js';
 
 const UA = 'PerCapitaMapsStudio/1.0 (private tool)';
 const SEEDS = [
@@ -18,9 +19,12 @@ const SEEDS = [
 // Rankings always run from the highest value down, so a question about the low end ("cheapest",
 // "where $100 goes furthest") would reveal the wrong country.
 const LOW_END = /\b(cheapest|cheaper|least|lowest|fewest|poorest|smallest|furthest|farthest|most affordable)\b/i;
-export function lowEndProblem(question: string): string | undefined {
+export function lowEndProblem(question: string, datasetId?: string): string | undefined {
   const m = question.match(LOW_END);
-  return m ? `asks about the low end ("${m[0]}"), but the video reveals the highest value` : undefined;
+  if (m) return `asks about the low end ("${m[0]}"), but the video reveals the highest value`;
+  const high = datasetId ? HIGH_END[datasetId] : undefined;
+  const w = high && question.match(high.wrongWay);
+  return w ? `says "${w[0]}", but the #1 of this dataset is ${high!.means}` : undefined;
 }
 
 // Asks the model whether each dataset's #1 really answers its question. Angles it says no to are
@@ -32,7 +36,7 @@ async function fitsData(angles: Angle[], datasets: DatasetRow[]): Promise<{ keep
   const res = await chatJson<{ fits?: unknown[] }>({
     temperature: 0.1,
     system: P.ANGLE_SYSTEM,
-    user: P.fitUser(rows.map((r) => ({ question: r.a.question, title: r.ds!.spec.title, unit: r.ds!.spec.unit }))),
+    user: P.fitUser(rows.map((r) => ({ question: r.a.question, title: r.ds!.spec.title, unit: r.ds!.spec.unit, highMeans: HIGH_END[r.ds!.id]?.means }))),
     numPredict: 200,
   }).catch((e) => { console.warn('[discover] fit check failed, keeping all ideas:', e.message); return { fits: [] as unknown[] }; });
   const fits = Array.isArray(res.fits) && res.fits.length === rows.length ? res.fits : undefined;
@@ -116,7 +120,7 @@ export async function insertTopics(angles: Angle[], datasets: DatasetRow[], sour
     if (!ds) { skipped.push(`${a.question}: unknown dataset ${a.dataset_id}`); continue; }
     if (!a.question || a.question.split(/\s+/).length > 14) { skipped.push(`${a.question}: question too long`); continue; }
     if (SENSITIVE.test(a.question)) { skipped.push(`${a.question}: sensitive`); continue; }
-    const low = lowEndProblem(a.question);
+    const low = lowEndProblem(a.question, a.dataset_id);
     if (low) { skipped.push(`${a.question}: ${low}`); continue; }
     const format = (FORMAT_CODES as readonly string[]).includes(a.format) ? (a.format as Format) : 'MAP_REVEAL';
     let vector: number[] | null = null;
@@ -145,7 +149,10 @@ export async function insertTopics(angles: Angle[], datasets: DatasetRow[], sour
 }
 
 function datasetTable(rows: DatasetRow[]): string {
-  return rows.map((d) => `${d.id} | ${d.spec.title} | ${d.spec.unit} | ${d.latest_year ?? '?'} | ${d.countries ?? '?'}`).join('\n');
+  return rows.map((d) => {
+    const high = HIGH_END[d.id];
+    return `${d.id} | ${d.spec.title}${high ? ` (#1 = ${high.means})` : ''} | ${d.spec.unit} | ${d.latest_year ?? '?'} | ${d.countries ?? '?'}`;
+  }).join('\n');
 }
 
 async function recentTitles(): Promise<string> {

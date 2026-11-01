@@ -36,6 +36,15 @@ const WB = 'World Bank WDI';
 const WB_LIC = 'CC BY 4.0';
 const OWID_LIC = 'CC BY 4.0';
 
+// Datasets where the highest value is the "bad" end and a viewer could read the ranking backwards.
+// Every ranking runs from the highest value down, so the #1 of the Gini index is the MOST UNEQUAL
+// country. A question or title using the low-end words would reveal the opposite of what it asks
+// (the "most equal income" Short showed Colombia and Brazil). Kept in code, not in the database
+// spec, so it applies to queued topics too.
+export const HIGH_END: Record<string, { means: string; wrongWay: RegExp }> = {
+  wb_gini: { means: 'the most UNEQUAL incomes (a higher Gini means more inequality)', wrongWay: /\b(equal|equally|equality|fair|fairer|fairest|fairly)\b/i },
+};
+
 export const CATALOG: CatalogEntry[] = [
   // ---------- money ----------
   { id: 'wb_gdp_pc_ppp', title: 'GDP per person, adjusted for prices', unit: 'international dollars per person', topic: 'money', grp: 'income', ref: wb('NY.GDP.PCAP.PP.KD'), sourceName: WB, license: WB_LIC, prefix: '$' },
