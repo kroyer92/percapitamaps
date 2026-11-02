@@ -6,18 +6,17 @@ import { tg, say, esc } from './telegram.js';
 import { queue } from './lib/queue.js';
 import { produceOne, swapHook, type JobRow } from './produce.js';
 import { approve, linkVideo, parseVideoId } from './publish.js';
-import { followup } from './discover.js';
-import { track } from './activity.js';
+import { queueFollowup } from './followups.js';
 import { fmtIn } from './lib/time.js';
 import { setTune } from './tune.js';
-import { openingTest, videosOverview } from './analytics.js';
+import { applyOpening, openingKeyboard, openingTest, videosOverview } from './analytics.js';
 
 const HELP = [
   '<b>Per Capita Maps Studio</b>',
   'Buttons on each preview: ✅ Approve, ❌ Reject, Hook 1–5 (re-render with that opening line).',
   '',
   '/link &lt;job&gt; &lt;url&gt; – connect an uploaded video to its job',
-  '/followup &lt;job or video URL&gt; – queue 2 related videos for a winner',
+  '/followup &lt;job or video URL&gt; – queue 2 related videos (winners get theirs automatically)',
   '/produce [n] – make n videos now (default 1)',
   '/videos – every recent video, its link and its scorecards',
   '/tune [on|off|reset] – see or undo the weekly hook/length auto-tuning',
@@ -45,14 +44,6 @@ async function status(): Promise<string> {
     `Working on: ${qs.running.join(', ') || 'nothing'}${qs.waiting.length ? ` (then ${qs.waiting.join(', ')})` : ''}`,
     `Upcoming slots: ${slots.map((s) => `#${s.id} ${fmtIn(new Date(s.slot_at), config.localTz)}`).join(', ') || 'none booked'}`,
   ].join('\n');
-}
-
-async function queueFollowup(id: number): Promise<void> {
-  queue.add(`followup #${id}`, async () => {
-    const r = await track('scout', `Finding 2 follow-ups to winner #${id}`, () => followup(id), (r) => `Queued ${r.inserted} follow-up${r.inserted === 1 ? '' : 's'} to #${id}`);
-    await say(`➕ Follow-ups for #${id}: ${r.inserted} queued at top priority.${r.skipped.length ? `\nSkipped: ${esc(r.skipped.join('; '))}` : ''}`);
-  });
-  await say(`Working on follow-ups for #${id}…`);
 }
 
 async function onMessage(text: string): Promise<void> {
@@ -92,7 +83,10 @@ async function onMessage(text: string): Promise<void> {
       await say(await setTune((args[0] ?? '').toLowerCase()));
       return;
     case '/opening':
-      await say(['<b>Map Reveal opening test</b> · rank strip vs classic, stayed at 72 h', ...(await openingTest()).lines.map(esc)].join('\n'));
+    {
+      const t = await openingTest();
+      await say(['<b>Map Reveal opening test</b> · rank strip vs classic, stayed at 72 h', ...t.lines.map(esc)].join('\n'), openingKeyboard(t));
+    }
       return;
     default:
       if (text.startsWith('/')) await say(HELP);
@@ -103,6 +97,11 @@ async function onCallback(cb: any): Promise<void> {
   const [kind, idRaw, arg] = String(cb.data ?? '').split(':');
   const id = Number(idRaw);
   await tg('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => undefined);
+  if (kind === 'op' && (arg === 'rank_strip' || arg === 'classic')) {
+    await tg('editMessageReplyMarkup', { chat_id: config.telegramChatId, message_id: cb.message?.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+    await say(await applyOpening(arg));
+    return;
+  }
   const job = await one<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]);
   if (!job) return;
   const clearButtons = () => tg('editMessageReplyMarkup', { chat_id: config.telegramChatId, message_id: cb.message?.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);

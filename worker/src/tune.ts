@@ -97,7 +97,7 @@ export async function autoTune(): Promise<string[]> {
     }
     const measured = Object.keys(scores);
     if (measured.length < 2) {
-      lines.push(`${LABEL[dim]}: not enough data yet (${MIN_VIDEOS}+ measured videos per option needed).`);
+      lines.push(`${LABEL[dim]}: not moved yet, it needs ${MIN_VIDEOS}+ measured videos per option first. It retries every Sunday on its own.`);
       continue;
     }
     // Measured options share their current weight in proportion to how they perform.
@@ -129,7 +129,8 @@ export async function tuneStatus(): Promise<string> {
     `<b>Auto-tuning ${t.enabled ? 'on' : 'off'}</b>${t.updated_at ? ` · last change ${t.updated_at.slice(0, 10)}` : ''}`,
     show('hook'), show('length'),
     'Formats are tuned by the format bandit once 10 videos have 72h numbers.',
-    '<code>/tune off</code> go back to the plain .env rotation · <code>/tune on</code> · <code>/tune reset</code> even weights',
+    t.enabled ? '✅ Nothing for you to do: it re-weights itself every Sunday.' : '⚠️ It is off, so hooks and lengths just rotate. To turn it back on, send <code>/tune on</code>.',
+    '<i>Only if you ever want to override it: <code>/tune off</code> plain rotation · <code>/tune reset</code> even weights.</i>',
   ].join('\n');
 }
 

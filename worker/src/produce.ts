@@ -15,6 +15,7 @@ import { runQa, qaSummary, type QaReport } from './qa.js';
 import { esc, sendVideo, say, alert, type Keyboard } from './telegram.js';
 import { fitFormat, pickFormat, blockedFormat } from './formats.js';
 import { pickVariant } from './tune.js';
+import { chosenOpening } from './analytics.js';
 import { localDate } from './lib/time.js';
 import type { VoiceClip } from './voice.js';
 import type { MusicPick } from './audio.js';
@@ -71,9 +72,11 @@ export function jobVideo(id: number) {
 
 // The Map Reveal opening test: the opening with fewer live videos goes next (the rank strip on a
 // tie after a classic, and to start), so both get the same mix of topics and days. Failed and
-// rejected jobs don't count, which keeps the published videos even. MR_OPENING can fix one opening.
+// rejected jobs don't count, which keeps the published videos even. Once the test is decided (the
+// Telegram Apply button, or MR_OPENING in .env) every video gets that opening.
 async function pickOpening(strip: Opening): Promise<Opening | undefined> {
-  if (config.mrOpening !== 'alternate') return config.mrOpening === 'rank_strip' ? strip : undefined;
+  const chosen = await chosenOpening(); // the test's verdict, applied from Telegram (or MR_OPENING)
+  if (chosen) return chosen === 'rank_strip' ? strip : undefined;
   const c = await one<{ strip: number; classic: number; last: string | null }>(
     `SELECT count(*) FILTER (WHERE opening = 'rank_strip')::int AS strip, count(*) FILTER (WHERE opening = 'classic')::int AS classic,
        (SELECT opening FROM jobs WHERE opening IS NOT NULL ORDER BY id DESC LIMIT 1) AS last

@@ -5,7 +5,10 @@ import { config, FORMAT_NAMES, type Format } from './config.js';
 import { getSetting, q, setSetting } from './db.js';
 import { esc, say } from './telegram.js';
 import { ig, igToken } from './publish.js';
-import { score, mmss, type Grade, type IgInsights, type Score, type Snapshot, type VideoInfo } from './scorecard.js';
+import { score, mmss, nextStep, quantile, MIN_SAMPLE, STAGE_NAME, type Grade, type IgInsights, type Score, type Snapshot, type StepContext, type VideoInfo } from './scorecard.js';
+import { autoFollowup, hasFollowups, queueFollowup } from './followups.js';
+import type { Keyboard } from './telegram.js';
+import { isCurrent, versionOf, versionName } from './changes.js';
 import { autoTune, getTune } from './tune.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -20,6 +23,9 @@ const WINDOWS: { win: string; hours: number }[] = [
 ];
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
+// "Mon 16 Nov" in Niko's time zone.
+const day = (d: Date | number) => new Intl.DateTimeFormat('en-GB', { timeZone: config.localTz, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(d));
+const ANALYTICS_LAG_DAYS = 3; // YouTube Analytics runs 2–3 days behind, so a window's scorecard comes about this much later
 
 // YouTube Analytics lags 2–3 days behind Studio, so a snapshot taken on time often has no engaged
 // views yet. Such a snapshot is fetched again every run until the data arrives (or RETRY_HOURS run
@@ -172,9 +178,10 @@ async function igInsights(jobId: number): Promise<IgInsights | null> {
 type JobInfo = { id: number; title: string | null; hook_type: string | null; opening: string | null; script: { beats: Beat[] } | null; render: { clips: VoiceClip[]; seconds: number } | null; youtube_video_id: string };
 
 // Scores a fresh snapshot against the bands and the channel's other videos, saves the verdict and
-// tells you in Telegram what to change. Winners get a follow-up button.
+// tells you in Telegram what it means and what (if anything) has to happen. Winners get their
+// follow-ups queued automatically.
 async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = false): Promise<void> {
-  const job = (await q<JobInfo>(`SELECT id, packaging->>'title' AS title, hook_type, opening, script, render, youtube_video_id FROM jobs WHERE id = $1`, [jobId]))[0];
+  const job = (await q<JobInfo & { format: string; published_at: Date | null; created_at: Date }>(`SELECT id, packaging->>'title' AS title, hook_type, opening, format, published_at, created_at, script, render, youtube_video_id FROM jobs WHERE id = $1`, [jobId]))[0];
   const snap = (await q<Snapshot>('SELECT * FROM metrics WHERE job_id = $1 AND win = $2', [jobId, win]))[0];
   if (!job || !snap) return;
   const peers = await q<Snapshot>(
@@ -183,21 +190,31 @@ async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = f
   const video: VideoInfo = { hook_type: job.hook_type, beats: job.script?.beats ?? [], clips: job.render?.clips ?? [], seconds: job.render?.seconds ?? 0 };
   const sc = score(snap, video, peers);
   await q('UPDATE metrics SET score = $3 WHERE job_id = $1 AND win = $2', [jobId, win, sc]);
-  const keyboard = sc.verdict === 'winner' ? [[{ text: '➕ Make 2 follow-ups', callback_data: `fu:${jobId}` }]] : undefined;
   if (snap.engaged_views === null && Date.now() < retryUntil) {
     // YouTube Analytics hasn't caught up yet; the next WF5 run fetches this window again.
     office.finished('analyst', `#${jobId} at ${win}: waiting for YouTube Analytics to catch up`, jobId);
     return;
   }
   office.finished('analyst', `#${jobId} at ${win}: ${VERDICT[sc.verdict]}, ${sc.reason}`, jobId);
-  await say(scoreText(job, win, snap, sc, late), keyboard);
+  const ctx: StepContext = { win };
+  const i = WINDOWS.findIndex((w) => w.win === win);
+  const nextWin = WINDOWS[i + 1];
+  if (nextWin && job.published_at) {
+    const at = +new Date(job.published_at) + nextWin.hours * 3600_000 + ANALYTICS_LAG_DAYS * 86_400_000;
+    ctx.next = { win: nextWin.win, at: day(Math.max(at, Date.now() + 86_400_000)) };
+  }
+  if (sc.verdict === 'winner') ctx.followups = await autoFollowup(jobId).catch(() => undefined);
+  const t = await openingTest().catch(() => undefined);
+  if (t) ctx.openingTest = { decided: !!t.decided, readBy: t.readBy };
+  const made = isCurrent(job.format, job.created_at) ? null : `Made with an earlier version (${versionName(versionOf(job.format, job.created_at))}), so it shows how that version did, not what to change now.`;
+  await say(scoreText(job, win, snap, sc, late, [made, nextStep(sc, ctx)].filter(Boolean).join(' ')));
 }
 
 const VERDICT: Record<Score['verdict'], string> = { winner: '🏆 Winner', average: '🙂 Average', loser: '🔻 Loser', early: '⏳ Too early' };
 const g = (x?: Grade) => (x ? ` (${x})` : '');
 const n1 = (x?: number) => (x === undefined ? '–' : x >= 10 ? String(Math.round(x)) : x.toFixed(1));
 
-export function scoreText(job: Pick<JobInfo, 'id' | 'title' | 'youtube_video_id'> & { opening?: string | null }, win: string, s: Snapshot, sc: Score, late = false): string {
+export function scoreText(job: Pick<JobInfo, 'id' | 'title' | 'youtube_video_id'> & { opening?: string | null }, win: string, s: Snapshot, sc: Score, late = false, step?: string): string {
   const v = sc.values;
   const lines = [
     `📊 <b>#${job.id} · ${win}</b>${late ? ' (caught up)' : ''} · ${esc(job.title ?? '')}${job.opening ? ` · ${OPENING_LABEL[job.opening] ?? job.opening} opening` : ''}`,
@@ -207,9 +224,9 @@ export function scoreText(job: Pick<JobInfo, 'id' | 'title' | 'youtube_video_id'
   if (s.ig?.error) lines.push(`<b>Instagram</b> no insights: ${esc(s.ig.error.slice(0, 160))}`);
   else if (s.ig) lines.push(`<b>Instagram</b>${s.ig.age_hours !== undefined ? ` (Reel ${s.ig.age_hours}h old)` : ''} ${(s.ig.reach ?? 0).toLocaleString('en-US')} reached · skip ${n1(v.ig_skip)}%${g(sc.grades.ig_skip)} · watch ${n1(v.ig_watch_sec)} s${g(sc.grades.ig_watch)} · share ${n1(v.ig_share)}%${g(sc.grades.ig_share)}`);
   if (sc.drop) lines.push(`<b>Biggest drop</b> −${Math.round(sc.drop.loss * 100)} pts at ${mmss(sc.drop.from)}–${mmss(sc.drop.to)}, beat ${sc.drop.beat + 1}: "${esc(sc.drop.line)}"`);
-  for (const f of sc.fixes) lines.push(`👉 ${esc(f)}`);
-  if (sc.verdict === 'winner') lines.push('👉 Tap below for 2 follow-ups with the same story shape.');
-  if (sc.relative !== undefined) lines.push(`<i>${sc.relative.toFixed(1)}× your median engaged views at ${win}. Bands are your own once ${10} videos have a ${win} snapshot (${sc.peers} now).</i>`);
+  for (const w of sc.why ?? []) lines.push(`<b>Why</b> ${esc(w)}`);
+  if (sc.relative !== undefined) lines.push(`<i>${sc.relative.toFixed(1)}× your median engaged views at ${win}.</i>`);
+  if (step) lines.push(`<b>Your move:</b> ${esc(step)}`);
   return lines.join('\n');
 }
 
@@ -223,60 +240,147 @@ function median(xs: number[]): number {
 // The Map Reveal opening test (opening.ts): "stayed" (engaged views ÷ views) at 72 h, rank strip
 // against classic. It is read once both openings have 5 videos with 72 h numbers; before that,
 // topic luck moves the medians more than an opening can, so the answer is "too early". Then a
-// lead of 10 points or more decides it.
+// lead of 10 points or more decides it. Without such a lead it runs on to 10 videos each, and
+// then whichever is ahead wins. Every message ends with the verdict and the one tap it needs.
 const OPENING_MIN = 5;
+const OPENING_MAX = 10;
 const OPENING_BAR = 10; // points of "stayed"
 const OPENING_LAG_DAYS = 5; // the 72 h window, plus YouTube Analytics running 2–3 days behind
 const OPENING_LABEL: Record<string, string> = { rank_strip: 'rank strip', classic: 'classic' };
+export type OpeningChoice = 'rank_strip' | 'classic';
 
-export interface OpeningArm { key: string; label: string; n: number; median: number | null; pending: number; due: number | null }
-export interface OpeningTest { arms: OpeningArm[]; ready: boolean; lead: number | null; min: number; bar: number; lines: string[] }
+export interface OpeningArm { key: string; label: string; n: number; median: number | null; pending: number; due: number | null; pendingAt: number[] }
+export interface OpeningTest {
+  arms: OpeningArm[]; ready: boolean; lead: number | null; min: number; bar: number; lines: string[];
+  decided: OpeningChoice | null; // already settled: by the Apply button or MR_OPENING in .env
+  apply: OpeningChoice | null; // the test has a verdict that hasn't been applied yet: offer the button
+  readBy: string | null; // when the next read is due, e.g. "Mon 16 Nov"
+}
 
-export async function openingTest(): Promise<OpeningTest> {
-  const rows = await q<{ opening: string; at: Date | null; views: number | null; engaged: number | null }>(
-    `SELECT j.opening, COALESCE(j.published_at, j.slot_at) AS at, m.views, m.engaged_views AS engaged
-     FROM jobs j LEFT JOIN metrics m ON m.job_id = j.id AND m.win = '72h'
-     WHERE j.format = 'MAP_REVEAL' AND j.opening IS NOT NULL AND j.status IN ('approved', 'published')`);
-  const day = (d: Date) => new Intl.DateTimeFormat('en-GB', { timeZone: config.localTz, weekday: 'short', day: 'numeric', month: 'short' }).format(d);
+// The opening chosen with the Apply button; it beats MR_OPENING in .env.
+export async function chosenOpening(): Promise<OpeningChoice | null> {
+  const s = await getSetting<{ value: OpeningChoice; at: string }>('mr_opening');
+  if (s?.value === 'rank_strip' || s?.value === 'classic') return s.value;
+  return config.mrOpening === 'alternate' ? null : config.mrOpening;
+}
+
+export async function applyOpening(value: OpeningChoice): Promise<string> {
+  await setSetting('mr_opening', { value, at: new Date().toISOString() });
+  return `✅ Done: every new Map Reveal now uses the ${OPENING_LABEL[value]} opening. Nothing else to do; no restart needed.`;
+}
+
+type OpeningRow = { opening: string; at: Date | null; views: number | null; engaged: number | null };
+
+// The pure part of the read, so it can be checked without a database.
+export function readOpening(rows: OpeningRow[], decided: OpeningChoice | null, now = Date.now()): OpeningTest {
   const arms = ['rank_strip', 'classic'].map((key): OpeningArm => {
     const mine = rows.filter((r) => r.opening === key);
     const measured = mine.filter((r) => r.views && r.engaged !== null);
     const stays = measured.map((r) => Math.min(100, (r.engaged! / r.views!) * 100));
-    // When the last of the 5 should have its numbers, if enough videos are already out or booked.
-    const pending = mine.filter((r) => !measured.includes(r) && r.at).map((r) => +new Date(r.at!)).sort((a, b) => a - b);
+    const pendingAt = mine.filter((r) => !measured.includes(r) && r.at).map((r) => +new Date(r.at!)).sort((a, b) => a - b);
     const short = OPENING_MIN - stays.length;
-    const due = short > 0 && pending.length >= short ? pending[short - 1] + OPENING_LAG_DAYS * 86_400_000 : null;
-    return { key, label: OPENING_LABEL[key][0].toUpperCase() + OPENING_LABEL[key].slice(1), n: stays.length, median: stays.length ? median(stays) : null, pending: pending.length, due };
+    const due = short > 0 && pendingAt.length >= short ? pendingAt[short - 1] + OPENING_LAG_DAYS * 86_400_000 : null;
+    return { key, label: OPENING_LABEL[key][0].toUpperCase() + OPENING_LABEL[key].slice(1), n: stays.length, median: stays.length ? median(stays) : null, pending: pendingAt.length, due, pendingAt };
   });
   const [strip, classic] = arms;
   const ready = arms.every((a) => a.n >= OPENING_MIN);
+  const full = arms.every((a) => a.n >= OPENING_MAX);
   const lead = strip.median !== null && classic.median !== null ? strip.median - classic.median : null;
   const pct = (x: number | null) => (x === null ? '–' : `${Math.round(x)}%`);
-  const lines = arms.map((a) => `${a.label}: ${a.n} of ${OPENING_MIN} videos measured${a.pending ? ` (${a.pending} more out or booked)` : ''} · median stayed ${pct(a.median)}`);
-  if (!ready) {
-    const missing = arms.filter((a) => a.n < OPENING_MIN && !a.due);
-    lines.push(`⏳ Too early to read: each opening needs ${OPENING_MIN} Map Reveal videos with 72 h numbers. ${missing.length
-      ? `${missing.map((a) => `${a.label} needs ${OPENING_MIN - a.n - a.pending} more made`).join(', ')} first.`
-      : `They should all be in around ${day(new Date(Math.max(...arms.map((a) => a.due ?? 0))))}.`} Keep both openings as they are until then.`);
-  } else if (lead! >= OPENING_BAR) lines.push(`✅ The rank strip keeps ${Math.round(lead!)} points more viewers. Make it the only opening: MR_OPENING=rank_strip in .env.`);
-  else if (lead! <= -OPENING_BAR) lines.push(`🔻 The rank strip keeps ${Math.round(-lead!)} points fewer viewers. Go back to classic: MR_OPENING=classic in .env.`);
-  else lines.push(`No clear winner (${lead! >= 0 ? '+' : ''}${Math.round(lead!)} points; it takes ${OPENING_BAR}). Keep alternating until each opening has 10 videos.`);
-  return { arms, ready, lead, min: OPENING_MIN, bar: OPENING_BAR, lines };
+  // When each arm reaches `target` measured videos, if enough are already out or booked.
+  const dueFor = (target: number) => {
+    let latest = 0;
+    for (const a of arms) {
+      const short = target - a.n;
+      if (short <= 0) continue;
+      if (a.pendingAt.length < short) return { at: null, missing: arms.filter((x) => x.n + x.pendingAt.length < target).map((x) => `${x.label} needs ${target - x.n - x.pendingAt.length} more made`) };
+      latest = Math.max(latest, a.pendingAt[short - 1] + OPENING_LAG_DAYS * 86_400_000);
+    }
+    return { at: latest ? Math.max(latest, now) : null, missing: [] as string[] };
+  };
+  const lines = arms.map((a) => `${a.label}: ${a.n} of ${ready ? OPENING_MAX : OPENING_MIN} videos measured${a.pending ? ` (${a.pending} more out or booked)` : ''} · median stayed ${pct(a.median)}`);
+  let apply: OpeningChoice | null = null;
+  let readBy: string | null = null;
+  const when = (target: number) => {
+    const d = dueFor(target);
+    readBy = d.at ? day(d.at) : null;
+    return d.at ? `It should be readable around ${readBy}.` : `The bot makes the missing videos itself (${d.missing.join(', ')}), so the date follows once they are booked.`;
+  };
+  if (decided) {
+    lines.push(`✅ Decided: ${OPENING_LABEL[decided]} is the only Map Reveal opening now. Nothing for you to do.`);
+  } else if (!ready) {
+    lines.push(`⏳ Too early to read: each opening needs ${OPENING_MIN} Map Reveal videos with 72 h numbers. ${when(OPENING_MIN)} Nothing for you to do; leave both openings as they are until then.`);
+  } else if (lead! >= OPENING_BAR || lead! <= -OPENING_BAR) {
+    apply = lead! > 0 ? 'rank_strip' : 'classic';
+    lines.push(`${apply === 'rank_strip' ? '✅' : '🔻'} Verdict: the rank strip keeps ${Math.round(Math.abs(lead!))} points ${lead! > 0 ? 'more' : 'fewer'} viewers. Your move: tap "Use ${OPENING_LABEL[apply]} only" below. That is all; no restart needed.`);
+  } else if (full) {
+    apply = lead! >= 0 ? 'rank_strip' : 'classic';
+    lines.push(`Verdict: no real difference after ${OPENING_MAX} videos each (${lead! >= 0 ? '+' : ''}${Math.round(lead!)} points for the rank strip), so keep the one that is ahead. Your move: tap "Use ${OPENING_LABEL[apply]} only" below. That is all; no restart needed.`);
+  } else {
+    lines.push(`⏳ No clear winner yet (${lead! >= 0 ? '+' : ''}${Math.round(lead!)} points; it takes ${OPENING_BAR}), so the test runs on to ${OPENING_MAX} videos each. ${when(OPENING_MAX)} Nothing for you to do.`);
+  }
+  return { arms, ready, lead, min: OPENING_MIN, bar: OPENING_BAR, lines, decided, apply, readBy };
 }
+
+export async function openingTest(): Promise<OpeningTest> {
+  const rows = await q<OpeningRow>(
+    `SELECT j.opening, COALESCE(j.published_at, j.slot_at) AS at, m.views, m.engaged_views AS engaged
+     FROM jobs j LEFT JOIN metrics m ON m.job_id = j.id AND m.win = '72h'
+     WHERE j.format = 'MAP_REVEAL' AND j.opening IS NOT NULL AND j.status IN ('approved', 'published')`);
+  return readOpening(rows, await chosenOpening());
+}
+
+export const openingKeyboard = (t: OpeningTest): Keyboard | undefined =>
+  t.apply ? [[{ text: `✅ Use ${OPENING_LABEL[t.apply]} only`, callback_data: `op:0:${t.apply}` }]] : undefined;
 
 export async function weeklyReport(): Promise<string> {
   return office.track('analyst', 'Writing the weekly report and re-tuning hooks and length', weeklyReportInner, () => 'Weekly report sent to Telegram');
 }
 
+// The channel-wide call in the Sunday report: the first funnel stage (stay → finish → shares →
+// subs) that most measured videos fail. It only speaks with 5+ videos past MIN_SAMPLE views, and
+// it never asks for a change to what the opening test is measuring before the test is read.
+const CHANNEL_MIN = 5;
+export interface ChannelCall { kind: 'wait' | 'ok' | 'change'; text: string }
+
+export interface CallVideo { grades: Record<string, Grade | undefined>; current: boolean }
+
+export function channelCall(videos: CallVideo[], opening: Pick<OpeningTest, 'decided' | 'readBy'> | undefined): ChannelCall {
+  // Only videos made with the current recipe of their format can say what to change next.
+  const old = videos.filter((v) => !v.current && v.grades.stay !== undefined).length;
+  const graded = videos.filter((v) => v.current).map((v) => v.grades).filter((g) => g.stay !== undefined);
+  if (graded.length < CHANNEL_MIN) {
+    return { kind: 'wait', text: `⏳ Too early for a channel-wide call: ${graded.length} of ${CHANNEL_MIN} videos made since the last change to their format have ${MIN_SAMPLE}+ views${old ? ` (${old} older video${old === 1 ? ' was' : 's were'} made with an earlier version, so ${old === 1 ? 'it shows' : 'they show'} how that version did, not what to change now)` : ''}. Nothing for you to do; it comes on its own as views grow.` };
+  }
+  const bad = (x?: Grade) => x === 'kill' || x === 'weak';
+  const failing = ['stay', 'finish', 'shares', 'subs'].find((k) => graded.filter((g) => bad(g[k])).length * 2 > graded.length);
+  if (!failing) return { kind: 'ok', text: `✅ On target across ${graded.length} videos made with the current version. Nothing to change and nothing for you to do.` };
+  const count = graded.filter((g) => bad(g[failing])).length;
+  const share = `${count} of ${graded.length} videos made with the current version are weak on ${STAGE_NAME[failing]}`;
+  if (failing === 'stay' && !opening?.decided) {
+    return { kind: 'wait', text: `⏳ ${share}. That is what the Map Reveal opening test is fixing, so nothing changes until it is read${opening?.readBy ? ` (around ${opening.readBy})` : ''}. Nothing for you to do.` };
+  }
+  const next = failing === 'stay'
+    ? 'the next opening fix (Guess flags first, then the Countdown anchor)'
+    : failing === 'finish' ? 'a shorter middle and an earlier reveal' : failing === 'shares' ? 'topics and endings that are worth sending on' : 'a clearer series hook in the title and end card';
+  return { kind: 'change', text: `🛠 ${share}. Next step is ${next}, which is a code change Claude makes. Your move: forward this report to Claude in the project chat; that is all.${opening && !opening.decided ? ' The Map Reveal opening stays untouched until its test is read.' : ''}` };
+}
+
 async function weeklyReportInner(): Promise<string> {
-  const rows = await q<{ id: number; format: Format; voice: string; hook_type: string; length_band: string; title: string; views: number; avg_view_pct: number; win: string }>(
-    `SELECT DISTINCT ON (j.id) j.id, j.format, j.voice, j.hook_type, j.length_band, j.packaging->>'title' AS title, m.views, m.avg_view_pct, m.win
+  const rows = await q<{ id: number; format: Format; voice: string; hook_type: string; length_band: string; title: string; views: number; avg_view_pct: number; win: string; score: Score | null }>(
+    `SELECT DISTINCT ON (j.id) j.id, j.format, j.voice, j.hook_type, j.length_band, j.packaging->>'title' AS title, m.views, m.avg_view_pct, m.win, m.score
      FROM jobs j JOIN metrics m ON m.job_id = j.id
      WHERE j.published_at > now() - interval '28 days'
      ORDER BY j.id, CASE m.win WHEN '7d' THEN 1 WHEN '72h' THEN 2 ELSE 3 END`);
   const ideas = await q<{ question: string; format: string; source: string }>(`SELECT question, format, source FROM topics WHERE status = 'idea' ORDER BY (source='launch') DESC, priority DESC LIMIT 5`);
+  const unlinked = await q<{ id: number; title: string | null }>(
+    `SELECT id, packaging->>'title' AS title FROM jobs
+     WHERE status = 'approved' AND youtube_video_id IS NULL AND slot_at < now() - interval '2 hours' AND slot_at > now() - interval '14 days' ORDER BY id`);
+  const linkLines = unlinked.map((r) => `<code>/link ${r.id} </code>+ the YouTube link of "${esc(r.title ?? '')}"`);
   if (!rows.length) {
-    const text = '<b>Weekly report</b>\nNo measured videos yet. Use /link after each upload so analytics can track them.';
+    const text = ['<b>Weekly report</b>', linkLines.length
+      ? `<b>Your move:</b> link ${linkLines.length === 1 ? 'this upload' : 'these uploads'} so I can measure ${linkLines.length === 1 ? 'it' : 'them'}:\n${linkLines.join('\n')}`
+      : '<b>Your move:</b> ✅ Nothing. No video has numbers yet; the first scorecards come on their own.'].join('\n');
     await say(text);
     return text;
   }
@@ -288,7 +392,47 @@ async function weeklyReportInner(): Promise<string> {
      GROUP BY 1 ORDER BY 2 DESC`);
   const verdictLine = verdicts.map((v) => `${v.verdict} ${v.n}`).join(' · ') || 'none scored yet';
   const tuneLines = await autoTune().catch((e) => [`Auto-tuning failed: ${esc(String(e.message ?? e))}`]);
-  const opening = await openingTest().catch((e) => ({ lines: [`Could not read the test: ${String(e.message ?? e)}`] }));
+  const opening = await openingTest().catch((e): undefined => { console.error('[opening]', e.message); return undefined; });
+
+  // Winners whose follow-ups haven't been made yet get them now (normally the scorecard already did).
+  const winners = rows.filter((r) => r.score?.verdict === 'winner');
+  const queued: number[] = [];
+  for (const w of winners) if (!(await hasFollowups(w.id))) { await queueFollowup(w.id, true).catch(() => undefined); queued.push(w.id); }
+  // Every measured video of the last 90 days, old ones included, each tagged with the version
+  // (changes.ts) it was made with.
+  const history = await q<{ id: number; format: string; made: Date; win: string; score: Score | null; views: number | null; engaged: number | null; apv: number | null }>(
+    `SELECT DISTINCT ON (j.id) j.id, j.format, j.created_at AS made, m.win, m.score, m.views, m.engaged_views AS engaged, m.avg_view_pct AS apv
+     FROM jobs j JOIN metrics m ON m.job_id = j.id
+     WHERE j.published_at > now() - interval '90 days' AND m.win IN ('72h','7d')
+     ORDER BY j.id, CASE m.win WHEN '7d' THEN 1 ELSE 2 END`);
+  const call = channelCall(history.filter((r) => r.score).map((r) => ({ grades: r.score!.grades ?? {}, current: isCurrent(r.format, r.made) })), opening);
+  const byVersion = new Map<string, { stay: number[]; apv: number[]; n: number }>();
+  for (const r of history) {
+    const k = `${FORMAT_NAMES[r.format as Format] ?? r.format} · ${versionName(versionOf(r.format, r.made))}${isCurrent(r.format, r.made) ? ' (current)' : ''}`;
+    const b = byVersion.get(k) ?? { stay: [], apv: [], n: 0 };
+    b.n++;
+    if (r.views && r.views >= MIN_SAMPLE && r.engaged !== null) b.stay.push(Math.min(100, (r.engaged / r.views) * 100));
+    if (r.apv !== null) b.apv.push(r.apv);
+    byVersion.set(k, b);
+  }
+  const versionLines = [...byVersion.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, b]) =>
+    `${esc(k)}: ${b.n} video${b.n === 1 ? '' : 's'} · median stayed ${b.stay.length ? `${Math.round(median(b.stay))}%` : '–'}${b.stay.length < b.n ? ` (${b.stay.length} with ${MIN_SAMPLE}+ views)` : ''} · watched ${b.apv.length ? `${Math.round(median(b.apv))}%` : '–'}`);
+
+  // The top of the report: what Niko has to do, what was done for him, and what waits on data.
+  const yours: string[] = [];
+  if (linkLines.length) yours.push(`Link ${linkLines.length === 1 ? 'this upload' : 'these uploads'} so I can measure ${linkLines.length === 1 ? 'it' : 'them'}:\n${linkLines.join('\n')}`);
+  if (opening?.apply) yours.push(`Tap "Use ${OPENING_LABEL[opening.apply]} only" below (Map Reveal opening test has a verdict).`);
+  if (call.kind === 'change') yours.push('Forward this report to Claude in the project chat (see "Channel call").');
+  const done = [
+    queued.length ? `Queued 2 follow-ups each for winner${queued.length === 1 ? '' : 's'} ${queued.map((i) => `#${i}`).join(', ')}.` : '',
+    winners.length && !queued.length ? `Winner${winners.length === 1 ? '' : 's'} ${winners.map((w) => `#${w.id}`).join(', ')} already ${winners.length === 1 ? 'has its' : 'have their'} follow-ups.` : '',
+    'Re-weighted hook types and lengths toward what earns more views (details below).',
+  ].filter(Boolean);
+  const waiting = [
+    opening && !opening.decided && !opening.apply && !call.text.includes('opening test') ? `Map Reveal opening test: ${opening.readBy ? `readable around ${opening.readBy}` : 'not readable yet'}.` : '',
+    call.kind === 'wait' ? call.text.replace(/^⏳ /, '') : '',
+  ].filter(Boolean);
+
   const sorted = [...rows].sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
   const cut = sorted[Math.max(0, Math.floor(sorted.length * 0.2) - 1)]?.views ?? Infinity;
   const line = (r: (typeof rows)[number]) => `#${r.id} ${esc(r.title ?? '')} · ${(r.views ?? 0).toLocaleString('en-US')} views${r.avg_view_pct ? ` · ${Math.round(r.avg_view_pct)}% viewed` : ''} (${r.win})${(r.views ?? 0) >= cut ? ' 🏆' : ''}`;
@@ -299,19 +443,26 @@ async function weeklyReportInner(): Promise<string> {
   };
   const text = [
     '<b>Weekly report</b> (last 28 days)',
+    yours.length
+      ? `<b>Your move (${yours.length} thing${yours.length === 1 ? '' : 's'}):</b>\n${yours.map((y, i) => `${i + 1}. ${y}`).join('\n')}`
+      : '<b>Your move:</b> ✅ Nothing this week.',
+    `<b>Done for you:</b> ${done.join(' ')}`,
+    ...(waiting.length ? [`<b>Waiting on data:</b> ${esc(waiting.join(' '))}`] : []),
+    '', '<b>Channel call</b>', esc(call.text),
+    ...(versionLines.length ? ['', '<b>By version</b> (all videos of the last 90 days, at 72 h or 7 d)', ...versionLines] : []),
+    '', '<b>Map Reveal opening test</b> (stayed at 72 h)', ...(opening?.lines ?? ['Could not read the test this week; it is retried next Sunday.']).map(esc),
     '', '<b>Top 5</b>', ...sorted.slice(0, 5).map(line),
     ...(sorted.length > 5 ? ['', '<b>Bottom 5</b>', ...sorted.slice(-5).reverse().map(line)] : []),
     '', '<b>By format</b>', group('format'),
     '', '<b>By voice</b>', group('voice'),
     group('hook_type') ? `\n<b>By hook type</b>\n${group('hook_type')}` : '',
     group('length_band') ? `\n<b>By length</b>\n${group('length_band')}` : '',
-    '', '<b>Map Reveal opening test</b> (stayed at 72 h)', ...opening.lines.map(esc),
     '', '<b>Next in the queue</b>', ...ideas.map((i) => `· ${esc(i.question)} (${i.format}${i.source !== 'discover' ? `, ${i.source}` : ''})`),
     '', '<b>Verdicts</b>', verdictLine,
-    '', '<b>Auto-tuning</b>', ...tuneLines,
-    '', `🏆 = top 20% by views. Send <code>/followup &lt;id&gt;</code> for each winner, <code>/tune</code> to see or undo the weights.`,
+    '', '<b>Auto-tuning</b> (done automatically)', ...tuneLines,
+    '', '<i>🏆 = top 20% by views.</i>',
   ].filter((l) => l !== undefined).join('\n');
-  await say(text);
+  await say(text, opening ? openingKeyboard(opening) : undefined);
   await writeExport().catch((e) => console.error('[export]', e.message));
   return text;
 }
