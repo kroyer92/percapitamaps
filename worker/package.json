@@ -13,7 +13,8 @@
     "voice-check": "tsx src/cli/voice-check.ts",
     "produce": "tsx src/cli/produce.ts",
     "typecheck": "tsc --noEmit",
-    "seed-sql": "tsx src/cli/seed-sql.ts"
+    "seed-sql": "tsx src/cli/seed-sql.ts",
+    "comments-try": "tsx src/cli/comments-try.ts"
   },
   "dependencies": {
     "@fontsource/inter": "5.2.8",

@@ -1,0 +1,282 @@
+{
+  "id": "vbAAjC5uiuUAgL3L",
+  "name": "WF6 Comments",
+  "nodes": [
+    {
+      "id": "bd37e19e-f708-8c33-9840-2459a082a1ce",
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "40 * * * *"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "0f9c5fbc-afbd-06d2-8b04-c5a05f00a2f2",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        180
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "484d5d38-ba79-4f5a-fee1-dd0c20890f28",
+      "name": "My channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        80
+      ],
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/channels?part=id&mine=true",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "c57238d4-6be6-50b2-03d7-2d1ea319a8b7",
+      "name": "Recent comment threads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        80
+      ],
+      "parameters": {
+        "url": "=https://www.googleapis.com/youtube/v3/commentThreads?part=snippet,replies&allThreadsRelatedToChannelId={{ $json.items[0].id }}&maxResults=100&order=time&textFormat=plainText",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "1521623a-ac67-ed2c-35cf-32472d3d716f",
+      "name": "Threads with more replies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        80
+      ],
+      "parameters": {
+        "jsCode": "const threads = $('Recent comment threads').first().json.items ?? [];\nconst busy = threads.filter((t) => (t.snippet.totalReplyCount ?? 0) > (t.replies?.comments?.length ?? 0)).slice(0, 20);\nreturn busy.length ? busy.map((t) => ({ json: { parent_id: t.id } })) : [{ json: { parent_id: '' } }];"
+      }
+    },
+    {
+      "id": "f028b092-e147-dc44-77f0-0afdffe0dfe4",
+      "name": "Any?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "4e05405f-6b17-0d0d-b7b2-38f6b18184bb",
+              "leftValue": "={{ $json.parent_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "facd483d-914e-42b5-14c9-4006adfbf623",
+      "name": "All replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        0
+      ],
+      "parameters": {
+        "url": "=https://www.googleapis.com/youtube/v3/comments?part=snippet&parentId={{ $json.parent_id }}&maxResults=100&textFormat=plainText",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "2a8daa04-8dff-5f9d-f53c-7e6163b4a78b",
+      "name": "Bundle comments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        80
+      ],
+      "parameters": {
+        "jsCode": "const replies = $input.all().flatMap((i) => i.json.kind === 'youtube#commentListResponse' ? i.json.items ?? [] : []);\nreturn [{ json: { channel_id: $('My channel').first().json.items?.[0]?.id ?? '', threads: $('Recent comment threads').first().json.items ?? [], replies } }];"
+      }
+    },
+    {
+      "id": "82f77277-3962-3204-c70d-2df74f314a8a",
+      "name": "Draft replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1680,
+        80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://render-worker:8080/comments/youtube",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Every hour": {
+      "main": [
+        [
+          {
+            "node": "My channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "My channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "My channel": {
+      "main": [
+        [
+          {
+            "node": "Recent comment threads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recent comment threads": {
+      "main": [
+        [
+          {
+            "node": "Threads with more replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Threads with more replies": {
+      "main": [
+        [
+          {
+            "node": "Any?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any?": {
+      "main": [
+        [
+          {
+            "node": "All replies",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Bundle comments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All replies": {
+      "main": [
+        [
+          {
+            "node": "Bundle comments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bundle comments": {
+      "main": [
+        [
+          {
+            "node": "Draft replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "errorWorkflow": "WaMuKb7OhPyHjGKs"
+  },
+  "pinData": {},
+  "tags": []
+}

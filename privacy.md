@@ -1,6 +1,6 @@
 # Per Capita Maps Studio – Privacy Policy
 
-Last updated: 26 October 2026
+Last updated: 1 November 2026
 
 Per Capita Maps Studio ("the tool") is a private tool operated by the owner of the YouTube channel
 "Per Capita Maps" (@PerCapitaMaps). It uploads videos to, and reads analytics for, that one channel only.
@@ -19,20 +19,23 @@ Through the YouTube API Services, and only for the owner's own channel:
 - channel and video metadata (video IDs, titles, descriptions, playlists),
 - the videos the owner uploads,
 - the owner's own comments posted under those videos,
+- public comments that viewers post under the owner's videos (comment text, the commenter's public
+  display name and the time), so the tool can suggest a reply that the owner then posts by hand,
 - view, watch-time and similar statistics from YouTube Analytics.
 
-No data about any other YouTube user or channel is collected.
+No other data about any other YouTube user or channel is collected.
 
 ## How the data is used
 
 The data is used only to publish the owner's videos and to show the owner which of their videos perform well,
-for example the median views per video format. It is never sold, shared with third parties, or used for advertising.
+for example the median views per video format. Viewer comments are only read to suggest replies to the owner: they are processed on the owner's
+server, shown only to the owner in the tool's private Telegram chat, and never sent to an AI provider or any other service. The data is never sold, shared with third parties, or used for advertising.
 
 ## Storage and deletion
 
 - Data is stored on a private server controlled by the owner.
 - Video statistics and the metrics derived from them are kept for at most 36 months, then deleted.
-- Other data obtained from the YouTube API Services (such as video titles and descriptions) is refreshed or deleted within 30 days.
+- Other data obtained from the YouTube API Services (such as video titles, descriptions and viewer comments) is refreshed or deleted within 30 days.
 - All stored data obtained from the YouTube API Services is deleted within 30 days after access is revoked, or on request.
 
 ## Cookies and devices
