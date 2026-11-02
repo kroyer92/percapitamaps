@@ -4,6 +4,7 @@ import { config, FORMAT_NAMES, type Format } from './config.js';
 import { chatJson } from './llm.js';
 import { factsForLlm, type Facts } from './facts.js';
 import * as P from './prompts.js';
+import { HIGH_END } from './data/catalog.js';
 import { planFor, writePlanned, type Slot } from './plan.js';
 import { spokenName, type Opening } from './opening.js';
 import { allowedNumbers, checkScript, isMinor, type Filler, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
@@ -213,6 +214,11 @@ export async function generateContent(opts: {
     // A title or summary with a number that isn't in the facts falls back to the question.
     if (checkText('title', pk.title, allowed).length) pk.title = question.slice(0, 70);
     if (!pk.summary || checkText('summary', pk.summary, allowed).length) pk.summary = question;
+    // A title or summary that reads the ranking backwards (Gini: "most equal") falls back to the question,
+    // which already passed the same check when it was queued.
+    const wrongWay = HIGH_END[facts.dataset_id]?.wrongWay;
+    if (wrongWay?.test(pk.title)) pk.title = question.slice(0, 70);
+    if (wrongWay?.test(pk.summary)) pk.summary = question;
     const hidden = hideAnswer(pk, facts, format, question);
     if (hidden.length) onStep(`Packaging named the answer; replaced: ${hidden.join(', ')}`);
 

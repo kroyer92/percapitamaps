@@ -26,10 +26,10 @@ Return JSON only:
 }
 
 // Second look at the proposed angles: does the dataset's #1 (its highest value) answer each question?
-export function fitUser(rows: { question: string; title: string; unit: string }[]): string {
+export function fitUser(rows: { question: string; title: string; unit: string; highMeans?: string }[]): string {
   return `Each video below ranks countries by one dataset, highest value first, and reveals the #1 as the answer to its question.
 For each, say whether "the country with the highest value of the dataset" honestly answers the question, using only what that dataset measures. Answer no when the question asks about the low end, or about something the dataset doesn't measure (prices, what money buys, causes, opinions).
-${rows.map((r, i) => `${i + 1}. Question: "${r.question}" | dataset: ${r.title} (${r.unit})`).join('\n')}
+${rows.map((r, i) => `${i + 1}. Question: "${r.question}" | dataset: ${r.title} (${r.unit})${r.highMeans ? `; its #1 is ${r.highMeans}` : ''}`).join('\n')}
 Return JSON only: {"fits":[true,false,...]} with exactly ${rows.length} values, in order.`;
 }
 

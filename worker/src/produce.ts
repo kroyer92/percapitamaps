@@ -138,7 +138,7 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
       return skips < 2 ? produceOne(skips + 1) : undefined;
     }
     // Ideas queued before the low-end check existed can still ask about the cheapest or poorest.
-    const low = lowEndProblem(topic.question);
+    const low = lowEndProblem(topic.question, topic.dataset_id);
     if (low) {
       await q(`UPDATE jobs SET status = 'skipped', error = $2, updated_at = now() WHERE id = $1`, [id, low]);
       await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [topic.id]);

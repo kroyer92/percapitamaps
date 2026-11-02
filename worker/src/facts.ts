@@ -1,6 +1,6 @@
 // Deterministic facts builder. Every number a video may say or show is computed here,
 // formatted once, and handed to the language model as the only numbers it may use.
-import type { CatalogEntry } from './data/catalog.js';
+import { HIGH_END, type CatalogEntry } from './data/catalog.js';
 import { fetchSeries, type Series } from './data/fetch.js';
 import { ANCHORS, countryName } from './data/countries.js';
 import type { Format } from './config.js';
@@ -20,6 +20,7 @@ export interface Facts {
   source_url: string;
   license: string;
   ranking: RankRow[];
+  ranking_note?: string; // what #1 means when the highest value is the "bad" end (Gini)
   world_median: string;
   top_vs_median?: string;
   top_vs_usa?: string;
@@ -139,6 +140,7 @@ export function buildFacts({ ds, series, population, format }: BuildInput): Fact
     source_url: ds.source_url ?? series.url,
     license: ds.license,
     ranking,
+    ranking_note: HIGH_END[ds.id] ? `#1 is ${HIGH_END[ds.id].means}. Never call the top of this ranking the most equal or fairest.` : undefined,
     world_median: formatValue(med, ds),
     top_vs_median: ranking[0] ? ratioText(ranking[0].value, med) : undefined,
     top_vs_usa: ranking[0] && usa && ranking[0].iso3 !== 'USA' ? ratioText(ranking[0].value, usa.value) : undefined,
@@ -263,6 +265,7 @@ export function factsForLlm(f: Facts, format: Format, mentioned: string[] = []):
   const out: Record<string, unknown> = {
     measure: f.title,
     unit: f.unit,
+    ...(f.ranking_note ? { what_number_1_means: f.ranking_note } : {}),
     year: f.year_text ?? String(f.year),
     countries_ranked: String(f.countries_count),
     top10: f.ranking.slice(0, 10).map((r) => ({ rank: String(r.rank), country: r.name, code: r.iso3, value: r.display })),
