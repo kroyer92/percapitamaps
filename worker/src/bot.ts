@@ -9,13 +9,16 @@ import { approve, linkVideo, parseVideoId } from './publish.js';
 import { queueFollowup } from './followups.js';
 import { fmtIn } from './lib/time.js';
 import { setTune } from './tune.js';
+import { approveLongform, linkLongform, makeLongform, rejectLongform } from './longform/make.js';
+import { THEMES } from './longform/themes.js';
 import { applyOpening, openingKeyboard, openingTest, videosOverview } from './analytics.js';
 
 const HELP = [
   '<b>Per Capita Maps Studio</b>',
   'Buttons on each preview: ✅ Approve, ❌ Reject, Hook 1–5 (re-render with that opening line).',
   '',
-  '/link &lt;job&gt; &lt;url&gt; – connect an uploaded video to its job',
+  '/link &lt;job&gt; &lt;url&gt; – connect an uploaded video to its job (long-form: /link L1 &lt;url&gt;)',
+  '/longform [theme] – make the long-form video now (it also runs by itself every Saturday evening)',
   '/followup &lt;job or video URL&gt; – queue 2 related videos (winners get theirs automatically)',
   '/produce [n] – make n videos now (default 1)',
   '/videos – every recent video, its link and its scorecards',
@@ -63,7 +66,20 @@ async function onMessage(text: string): Promise<void> {
       await say(`🎬 Queued ${n} video${n > 1 ? 's' : ''}. Each takes about 10–20 minutes; previews arrive here.`);
       return;
     }
+    case '/longform': {
+      const theme = (args[0] ?? '').toLowerCase();
+      if (theme && !THEMES.some((t) => t.key === theme)) { await say(`Themes: ${THEMES.map((t) => t.key).join(', ')}. Or just /longform and the Shorts' views pick one.`); return; }
+      const ahead = queue.add('long-form video', async () => { await makeLongform({ theme: theme || undefined }); });
+      await say(`🎞 Long-form queued${ahead > 1 ? ` behind ${ahead - 1} other job${ahead > 2 ? 's' : ''}` : ''}. It takes about an hour; it arrives here when it's done.`);
+      return;
+    }
     case '/link': {
+      const lf = /^L(\d+)$/i.exec(args[0] ?? '');
+      if (lf) {
+        if (!args[1] || !parseVideoId(args[1])) { await say('Use it like this: <code>/link L1 https://youtu.be/abc123DEF45</code>'); return; }
+        await say(await linkLongform(Number(lf[1]), args[1]));
+        return;
+      }
       const id = Number(args[0]);
       const vid = args[1] ? parseVideoId(args[1]) : undefined;
       if (!id || !vid) { await say('Use it like this: <code>/link 12 https://youtube.com/shorts/abc123DEF45</code>'); return; }
@@ -100,6 +116,12 @@ async function onCallback(cb: any): Promise<void> {
   if (kind === 'op' && (arg === 'rank_strip' || arg === 'classic')) {
     await tg('editMessageReplyMarkup', { chat_id: config.telegramChatId, message_id: cb.message?.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
     await say(await applyOpening(arg));
+    return;
+  }
+  if (kind === 'la' || kind === 'lr') {
+    await tg('editMessageReplyMarkup', { chat_id: config.telegramChatId, message_id: cb.message?.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+    if (kind === 'la') await approveLongform(id);
+    else await rejectLongform(id);
     return;
   }
   const job = await one<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]);
@@ -139,6 +161,7 @@ export async function startBot(): Promise<void> {
       { command: 'followup', description: 'Two related videos for a winner' },
       { command: 'videos', description: 'Recent videos and their scorecards' },
       { command: 'tune', description: 'See or undo auto-tuning: /tune off' },
+      { command: 'longform', description: 'Make the long-form video now' },
       { command: 'opening', description: 'Map Reveal opening test: can it be read yet?' },
       { command: 'help', description: 'All commands' },
     ],

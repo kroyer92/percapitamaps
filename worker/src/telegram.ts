@@ -69,6 +69,23 @@ export async function sendVideo(file: string, caption: string, keyboard?: Keyboa
   return json.result.message_id;
 }
 
+export async function sendPhoto(file: string, caption: string, keyboard?: Keyboard): Promise<number | undefined> {
+  if (!config.telegramToken || !config.telegramChatId) {
+    console.log('[telegram disabled] photo', file, caption);
+    return undefined;
+  }
+  const form = new FormData();
+  form.set('chat_id', config.telegramChatId);
+  form.set('caption', caption.slice(0, 1024));
+  form.set('parse_mode', 'HTML');
+  if (keyboard) form.set('reply_markup', JSON.stringify({ inline_keyboard: keyboard }));
+  form.set('photo', await fs.openAsBlob(file), 'thumb.png');
+  const res = await fetch(api('sendPhoto'), { method: 'POST', body: form, signal: AbortSignal.timeout(2 * 60_000) });
+  const json: any = await res.json();
+  if (!json.ok) throw new Error(`Telegram sendPhoto: ${json.description}`);
+  return json.result.message_id;
+}
+
 export async function alert(text: string): Promise<void> {
   await say(`⚠️ ${esc(text)}`).catch((e) => console.error('[telegram] alert failed', e));
 }
