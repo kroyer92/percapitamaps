@@ -37,6 +37,8 @@ n8n (schedules, YouTube credentials)          render-worker (this repo, worker/)
 | Queue the 10 launch concepts | `docker compose exec -T postgres psql -U percapita -d percapita < app/sql/seed_launch_concepts.sql` |
 | One test video | `docker compose exec render-worker npm run test-render -- --concept cattle` |
 | Voice samples | `docker compose exec render-worker npm run voice-test` |
+| Long-form script only (no render) | `docker compose exec render-worker npm run longform -- --plan --theme money` |
+| Long-form thumbnail again | `docker compose exec render-worker npm run thumb -- --longform 1` |
 | Re-check datasets | `docker compose exec render-worker npm run check-datasets` |
 | Import n8n workflows | `docker compose exec n8n n8n import:workflow --separate --input=/import/workflows` |
 | Worker logs | `docker compose logs -f render-worker` |
@@ -101,7 +103,23 @@ Setup on the server, once:
 ## Telegram
 
 Buttons on each preview: Approve, Reject, Hook 1–5. Commands: `/status`, `/produce [n]`,
-`/link <job> <url>`, `/followup <job or url>`, `/tune [on|off|reset]`, `/opening`, `/help`.
+`/link <job> <url>`, `/followup <job or url>`, `/tune [on|off|reset]`, `/opening`, `/longform [theme]`, `/help`.
+
+## Weekly long-form video
+
+`worker/src/longform/`: one 16:9 video a week, 8 to 10 maps on one theme (money, health, food, work,
+people, energy, tech, nature; `themes.ts`). The theme is the one whose datasets earned the Shorts the
+most views, skipping the last four themes used. Every line is written by code from the facts builder,
+so no number can be made up: per map a title card, the world in blue, ranks 10 to 6, then 5 to 2,
+the #1 in amber, then extra facts (an anchor country, China and India, who led ten years earlier, the
+bottom). Intro, chapters, an "every #1" recap, and a thumbnail (`remotion/Longform.tsx`, `Thumb.tsx`).
+
+It runs by itself on Saturday from 21:00 (LOCAL_TZ) in the same work lane as the Shorts, takes about
+an hour, and arrives in Telegram with the thumbnail, a link to watch it, and Approve/Reject. Approve
+sends the upload steps, title, description with chapters, tags, pinned comment, and which Shorts to
+point their "Related video" at. `/longform [theme]` makes one now; `/link L1 <url>` records the
+upload. `LONGFORM_AUTO=off` in `app/.env` stops the weekly run. Files: `renders/longform-N.mp4`, a
+download copy under `public/longform/` (deleted after 14 days; renders after 30).
 
 ## Automatic analysis
 

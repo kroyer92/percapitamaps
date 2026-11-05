@@ -12,6 +12,8 @@
     "voice-test": "tsx src/cli/voice-test.ts",
     "voice-check": "tsx src/cli/voice-check.ts",
     "produce": "tsx src/cli/produce.ts",
+    "longform": "tsx src/cli/longform.ts",
+    "thumb": "tsx src/cli/thumb.ts",
     "typecheck": "tsc --noEmit",
     "seed-sql": "tsx src/cli/seed-sql.ts",
     "comments-try": "tsx src/cli/comments-try.ts"

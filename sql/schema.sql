@@ -121,3 +121,22 @@ CREATE TABLE IF NOT EXISTS comments (
   sent_at      timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (platform, id)
 );
+
+-- The weekly long-form video (worker/src/longform). One row per video; `n` is its number.
+CREATE TABLE IF NOT EXISTS longforms (
+  n            serial PRIMARY KEY,
+  theme        text NOT NULL,
+  status       text NOT NULL DEFAULT 'making',   -- making | ready | approved | rejected | failed | published
+  datasets     text[],
+  packaging    jsonb,                            -- title, title_options, description, tags, pinned_comment
+  chapters     jsonb,                            -- [{at: seconds, label}]
+  related      jsonb,                            -- Shorts whose "Related video" should point here
+  seconds      numeric,
+  video_path   text,
+  thumb_path   text,
+  public_files jsonb,                            -- {video, thumb}: names under MEDIA_DIR/longform
+  error        text,
+  youtube_url  text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now()
+);

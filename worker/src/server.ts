@@ -15,6 +15,7 @@ import { run } from './lib/proc.js';
 import * as office from './activity.js';
 import { studio } from './studio.js';
 import { checkComments } from './comments.js';
+import { makeLongform, weeklyDue } from './longform/make.js';
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -120,6 +121,16 @@ async function housekeeping() {
         if (Date.now() - st.mtimeMs > 3 * 86_400_000) await fs.rm(path.join(dir, f), { force: true });
       }
     }
+    // Long-form copies stay downloadable for 14 days, the renders themselves for 30.
+    for (const f of await fs.readdir(path.join(config.mediaDir, 'longform')).catch(() => [] as string[])) {
+      const st = await fs.stat(path.join(config.mediaDir, 'longform', f));
+      if (Date.now() - st.mtimeMs > 14 * 86_400_000) await fs.rm(path.join(config.mediaDir, 'longform', f), { force: true });
+    }
+    for (const f of await fs.readdir(config.rendersDir).catch(() => [] as string[])) {
+      if (!f.startsWith('longform-')) continue;
+      const st = await fs.stat(path.join(config.rendersDir, f));
+      if (Date.now() - st.mtimeMs > 30 * 86_400_000) await fs.rm(path.join(config.rendersDir, f), { force: true });
+    }
     const { stdout } = await run('df', ['-P', config.rendersDir]);
     const used = Number(stdout.trim().split('\n').pop()!.split(/\s+/)[4].replace('%', ''));
     if (used > 80) await alert(`Disk is ${used}% full on the server.`);
@@ -137,8 +148,24 @@ setInterval(() => {
   }
 }, 60_000);
 
+// The weekly long-form video: Saturday evening, in the same work lane as the Shorts (longform/make.ts).
+let longformQueued = '';
+setInterval(async () => {
+  const day = new Date().toISOString().slice(0, 10);
+  if (longformQueued === day) return;
+  try {
+    if (await weeklyDue()) {
+      longformQueued = day;
+      queue.add('long-form video', async () => { await makeLongform(); });
+    }
+  } catch (e: any) {
+    console.error('[longform] weekly check', e.message);
+  }
+}, 10 * 60_000);
+
 // Jobs that were mid-production when the worker restarted would otherwise hang forever.
 async function recoverInterrupted() {
+  await q(`UPDATE longforms SET status = 'failed', error = 'worker restarted', updated_at = now() WHERE status = 'making'`);
   const stuck = await q<{ id: number; topic_id: number }>(`UPDATE jobs SET status = 'render_failed', error = 'worker restarted', updated_at = now() WHERE status IN ('producing','rendering') RETURNING id, topic_id`);
   for (const s of stuck) await q(`UPDATE topics SET status = 'idea' WHERE id = $1 AND status = 'producing'`, [s.topic_id]);
   if (stuck.length) await alert(`The worker restarted while making ${stuck.map((s) => `#${s.id}`).join(', ')}. Those topics are back in the queue.`);
