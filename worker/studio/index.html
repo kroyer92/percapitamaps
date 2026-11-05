@@ -359,7 +359,7 @@ function paintTv(s) {
   else if (y.eta.date) est = `At the last 14 days' pace (${fmt(y.eta.views_per_day)} Shorts views and ${(y.eta.subs_per_day ?? 0).toFixed(1)} subscribers a day) you qualify around <b>${fmtDate(y.eta.date)}</b>${y.eta.rule === 'now' ? `, before the rules change on ${fmtDate(ch)}` : `, under the stricter rules that start on ${fmtDate(ch)}`}.`;
   else est = `At the last 14 days' pace (${fmt(y.eta.views_per_day)} Shorts views and ${(y.eta.subs_per_day ?? 0).toFixed(1)} subscribers a day) the channel doesn't get there within two years. Winners and follow-ups are what moves this.`;
   const src = y.source === 'youtube'
-    ? `From YouTube${y.fetched_at ? `, updated ${since(y.fetched_at)} ago` : ''}. Views are near real time; watch hours are long-form only and run 2–3 days behind Studio.`
+    ? `From YouTube${y.fetched_at ? `, updated ${since(y.fetched_at)} ago` : ''}. Shorts views are YouTube Analytics plus the public view counter's gain since Analytics' last day, so the newest days are this tool's estimate; watch hours are long-form only and run 2–3 days behind Studio. The qualifying date is this tool's projection, not from YouTube.`
     : 'Estimated from the tracked videos until WF5 fetches the channel totals.';
   $('tv').innerHTML = `
     <div class="h">Road to monetization (YouTube Partner Program)</div>
@@ -407,7 +407,7 @@ function paintPerf(s) {
       <tr><td class="t" title="${esc(r.reason || '')}">${r.url ? `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title)}</a>` : esc(r.title)}</td>
       <td class="n">${fmt(r.views)}</td><td class="n ${cls(r.stay, 65, 75)}">${pct(r.stay)}</td>
       <td class="n">${r.verdict ? `<span class="vd ${r.verdict}">${r.verdict}${r.win ? ` · ${r.win}` : ''}</span>` : `<span class="vd">${r.win || 'no data yet'}</span>`}</td></tr>`).join('')}</tbody></table>
-      <div class="note-s">Stayed = engaged views ÷ views. Verdicts come from the scorecard at 24 h, 72 h and 7 days.</div>`
+      <div class="note-s">Views come from YouTube. Stayed (engaged views ÷ views) and the verdicts are calculated by this tool at 24 h, 72 h and 7 days; they are not YouTube metrics.</div>`
     : '<div class="empty">No published videos yet. After each upload, send <b>/link &lt;job&gt; &lt;url&gt;</b> in Telegram and the numbers start arriving 24 hours later.</div>');
 }
 
@@ -436,7 +436,7 @@ function paintLab(s) {
   const o = e.opening;
   const openingBlock = o ? `<div class="lab-h">Map Reveal opening · median stayed at 72 h</div>` + o.arms.map((a, i) => `<div class="hb"><span class="lab">${esc(a.label)}</span><span class="t"><i class="${o.ready && (i === 0) === (o.lead >= 0) ? 'win' : ''}" style="width:${(a.median ?? 0).toFixed(1)}%"></i></span><span class="v">${a.median === null ? '–' : `${Math.round(a.median)}%`} <small>${a.n}/${o.min}</small></span></div>`).join('') + `<div class="note-s">${esc(o.lines.at(-1))}</div>` : '';
   const tune = e.tune.enabled ? (e.tune.updated_at ? `Auto-tune last moved the weights ${since(e.tune.updated_at)} ago.` : 'Auto-tune is on and starts moving weights once 3 videos per option are measured.') : 'Auto-tune is off (/tune on in Telegram).';
-  $('lab').innerHTML = `<div class="h">Experiment lab</div>${openingBlock}${body}<div class="note-s">${running.length ? `Testing now: ${esc(running.join(' · '))}. ` : ''}${esc(tune)}</div>`;
+  $('lab').innerHTML = `<div class="h">Experiment lab</div>${openingBlock}${body}<div class="note-s">${running.length ? `Testing now: ${esc(running.join(' · '))}. ` : ''}${esc(tune)} Medians and stayed are calculated by this tool from YouTube numbers, not YouTube metrics.</div>`;
 }
 
 let state;
