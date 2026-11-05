@@ -34,14 +34,26 @@ const Captions: React.FC<{ beats: LongBeat[]; offset: number }> = ({ beats, offs
   const beat = [...beats].reverse().find((b) => b.start <= frame);
   if (!beat || !beat.words.length || frame > beat.end) return null;
   const pages: (typeof beat.words)[] = [];
-  for (let i = 0; i < beat.words.length; i += 9) pages.push(beat.words.slice(i, i + 9));
+  // A page ends at a full stop or question mark, or after 9 words, so a new sentence starts a new page.
+  let cur: typeof beat.words = [];
+  for (const w of beat.words) {
+    cur.push(w);
+    if (cur.length >= 9 || /[.?!]$/.test(w.text)) { pages.push(cur); cur = []; }
+  }
+  if (cur.length) pages.push(cur);
   const page = [...pages].reverse().find((p) => p[0].start <= frame) ?? pages[0];
   if (frame < page[0].start - 6) return null;
+  // Exactly one word is lit: the last one the voice has started, until the next one starts (or a
+  // moment after it ends, so a pause leaves nothing lit). Lighting every word whose time span
+  // covered the frame, with a few frames of slack, lit two or three at once.
+  let lit = -1;
+  page.forEach((w, i) => { if (w.start <= frame) lit = i; });
+  if (lit >= 0 && frame > page[lit].end + 6) lit = -1;
   return (
     <div style={{ position: 'absolute', left: 60, right: 60, top: 958, height: 72, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
       <div style={{ background: 'rgba(10,29,43,0.78)', borderRadius: 14, padding: '8px 22px', fontFamily: FONT, fontSize: 38, fontWeight: 800, color: C.pale, whiteSpace: 'nowrap' }}>
         {page.map((w, i) => (
-          <span key={i} style={{ color: frame >= w.start && frame < w.end + 4 ? C.blue : C.pale }}>{w.text}{i < page.length - 1 ? ' ' : ''}</span>
+          <span key={i} style={{ color: i === lit ? C.blue : C.pale }}>{w.text}{i < page.length - 1 ? ' ' : ''}</span>
         ))}
       </div>
     </div>

@@ -62,9 +62,9 @@ export async function synthesize(items: { id: string; text: string }[], voice: s
 
 export interface Word { word: string; start: number; end: number }
 
-export async function transcribe(audio: string): Promise<Word[]> {
+export async function transcribe(audio: string, timeoutMs = 10 * 60_000): Promise<Word[]> {
   const job = { models_dir: config.modelsDir, model: config.whisperModel, audio };
-  const { stdout } = await run(config.python, [path.resolve('py/transcribe.py')], { input: JSON.stringify(job), timeoutMs: 10 * 60_000 });
+  const { stdout } = await run(config.python, [path.resolve('py/transcribe.py')], { input: JSON.stringify(job), timeoutMs });
   return lastJsonLine<{ words: Word[] }>(stdout).words;
 }
 

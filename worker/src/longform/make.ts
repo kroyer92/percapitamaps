@@ -10,7 +10,7 @@ import { config } from '../config.js';
 import { one, q } from '../db.js';
 import { getDataset } from '../datasets.js';
 import { iso3ToIso2 } from '../data/countries.js';
-import { synthesize, type VoiceClip } from '../voice.js';
+import { synthesize, transcribe, type VoiceClip, type Word } from '../voice.js';
 import { captionWords, FPS, type Placed } from '../timeline.js';
 import { buildVoiceTrack, finalMix, pickMusic } from '../audio.js';
 import { run } from '../lib/proc.js';
@@ -36,7 +36,9 @@ const TAIL = 2.5;
 export interface Timed { beats: LongBeat[]; placed: Placed[]; seconds: number; chapters: { at: number; label: string }[] }
 
 // Lays every beat on one timeline. `clips` are in the same order as `flat`.
-export function timeLongform(plan: LongPlan, clips: VoiceClip[]): Timed {
+// `heard`: Whisper's word timings of the finished voice track. Without them the caption words are
+// spread over each line by their length, which drifts from the voice on numbers and pauses.
+export function timeLongform(plan: LongPlan, clips: VoiceClip[], heard: Word[] = []): Timed {
   const flat = flatBeats(plan);
   const placed: Placed[] = [];
   const beats: LongBeat[] = [];
@@ -68,7 +70,7 @@ export function timeLongform(plan: LongPlan, clips: VoiceClip[]): Timed {
       vo: p.beat.vo,
       on_screen: p.beat.on_screen,
       visual: p.beat.visual,
-      words: captionWords(p.beat.vo, p.voiceAt, p.clip.seconds),
+      words: captionWords(p.beat.vo, p.voiceAt, p.clip.seconds, heard),
     });
   });
   return { beats, placed, seconds, chapters };
@@ -231,9 +233,17 @@ export async function makeLongform(opts: { theme?: string; maps?: number } = {})
       clips.push(...await synthesize(beats.map((b, i) => ({ id: `g${String(g).padStart(2, '0')}b${String(i).padStart(2, '0')}`, text: b.vo })), voice, path.join(dir, 'voice')));
     }
     office.finished('narrator', `Long-form #${n}: ${clips.length} lines recorded`);
-    const timed = timeLongform(plan, clips);
+    let timed = timeLongform(plan, clips);
     const voiceTrack = path.join(dir, 'voice.wav');
     await buildVoiceTrack(timed.placed, timed.seconds, voiceTrack);
+    // Time the captions from what the voice actually says, as the Shorts do. The placement doesn't
+    // depend on it, so only the caption words change.
+    try {
+      step('timing the captions from the voice');
+      timed = timeLongform(plan, clips, await transcribe(voiceTrack, 40 * 60_000));
+    } catch (e: any) {
+      step(`caption timing fell back to estimates: ${String(e.message).slice(0, 120)}`);
+    }
     const props = longProps(plan, timed);
     await fs.writeFile(path.join(dir, 'props.json'), JSON.stringify(props));
 
