@@ -227,6 +227,8 @@ export function scoreText(job: Pick<JobInfo, 'id' | 'title' | 'youtube_video_id'
   for (const w of sc.why ?? []) lines.push(`<b>Why</b> ${esc(w)}`);
   if (sc.relative !== undefined) lines.push(`<i>${sc.relative.toFixed(1)}× your median engaged views at ${win}.</i>`);
   if (step) lines.push(`<b>Your move:</b> ${esc(step)}`);
+  // YouTube API Developer Policies III.E.4.h: derived numbers must be marked as not from YouTube.
+  lines.push('<i>From YouTube: views and watched %. Stayed, per-1k rates, grades, drop and verdict are calculated by this tool, not YouTube metrics.</i>');
   return lines.join('\n');
 }
 
