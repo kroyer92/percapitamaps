@@ -112,9 +112,13 @@ from those numbers (no language model), voiced, captioned word by word from Whis
 as a living island in the channel's map style (`remotion/nation/Nation.tsx`) and checked by QA. The
 preview comes to Telegram and approves itself `NATION_AUTO_APPROVE_MINUTES` (60) before the slot
 unless you press Reject; then WF3 uploads it like any Short (playlist `PLAYLIST_NATION`) and WF4
-posts the Reel as soon as it is live (`NATION_IG_DELAY_HOURS`, default 0). The page also runs a
-daily vote (flag, capital, animal, motto, dish, sport); each result is in the next episode, and the
-flag colours appear on the island and the passports. Episodes are jobs with format `NATION`, so
+posts the Reel as soon as it is live (`NATION_IG_DELAY_HOURS`, default 0). The page also runs
+votes, one question at a time in a fixed order (flag, capital, motto, animal, dish, sport;
+`VOTES` in `census.ts`). Voting waits for villagers: it opens at `NATION_VOTE_FROM` (50) citizens,
+and a question is decided at the first census where it has `NATION_VOTE_MIN` (20) votes, so it can
+stay open for days. Until voting opens, the Short says "At 50 citizens, you vote on our flag". A
+result is announced in that day's episode, and the flag colours appear on the island and the
+passports. Episodes are jobs with format `NATION`, so
 scorecards and analytics work as usual; they are left out of the format bandit and auto-tuning.
 
 Citizens come from our own page, not from YouTube comments: the YouTube API policies don't allow

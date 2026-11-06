@@ -20,7 +20,7 @@ import { handToN8n } from '../publish.js';
 import { queue } from '../lib/queue.js';
 import * as office from '../activity.js';
 import { METRIC } from './data.js';
-import { FLAG_COLOURS, VOTES, dayNumber, dayTimes, openVoteDay, takeCensus, voteFor, type Census } from './census.js';
+import { FLAG_COLOURS, VOTES, dayNumber, dayTimes, decided, openVote, tallyOf, takeCensus, type Census } from './census.js';
 import { censusStamp, nationBeats, nationFacts, nationPackaging } from './script.js';
 import { countryShape } from './shape.js';
 import type { NationProps } from '../../remotion/nation/types.js';
@@ -245,16 +245,20 @@ export async function nationCommand(args: string[]): Promise<string> {
   const now = new Date();
   const day = dayNumber(now);
   const total = await one<{ n: number; day: number }>(`SELECT count(*)::int AS n, count(*) FILTER (WHERE joined_at > now() - interval '24 hours')::int AS day FROM nation_citizens`);
-  const voteDay = await openVoteDay();
-  const tally = await q<{ choice: number; n: number }>('SELECT choice, count(*)::int AS n FROM nation_votes WHERE day = $1 GROUP BY choice ORDER BY n DESC', [voteDay]);
-  const v = voteFor(voteDay);
+  const st = await decided();
+  const v = openVote(st);
+  const tally = v ? await tallyOf(v) : [];
+  const votes = tally.reduce((a, b) => a + b, 0);
   const { census, slot } = dayTimes(now);
   return [
     '<b>Per Capita Nation</b>',
     `Page: ${config.nation.domain ? `https://${config.nation.domain}` : 'NATION_DOMAIN not set in app/.env'}`,
     day && day >= 1 ? `Today is Day ${day}. Census ${fmtIn(census, config.localTz)}, live ${fmtIn(slot, config.localTz)} your time.` : `Not started: Day 1 is NATION_START (${esc(config.nation.start || 'not set')}).`,
     `Citizens: ${fmt(total?.n ?? 0)} (${fmt(total?.day ?? 0)} in the last 24 hours)`,
-    `Vote: ${esc(v.question)} ${tally.length ? tally.map((t) => `${esc(v.options[t.choice] ?? '?')} ${t.n}`).join(', ') : 'no votes yet'}`,
+    !v ? 'Votes: all decided.' : (total?.n ?? 0) < config.nation.voteFrom
+      ? `Vote: opens at ${config.nation.voteFrom} citizens. First up: ${esc(v.question)}`
+      : `Vote: ${esc(v.question)} ${v.options.map((o, i) => `${esc(o)} ${tally[i]}`).join(', ')} (${votes} of the ${config.nation.voteMin} needed to decide)`,
+    ...(Object.keys(st).length ? [`Decided: ${Object.entries(st).map(([k, x]) => `${k} ${esc(x)}`).join(', ')}`] : []),
     '',
     '/nation test – a preview from the citizens so far (not uploaded)',
     "/nation make – make today's episode again",

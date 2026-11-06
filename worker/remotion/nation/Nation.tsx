@@ -410,7 +410,7 @@ export const Nation: React.FC<NationProps> = (p) => {
               </div>
               <div style={{ marginTop: 34, textAlign: 'center', opacity: sp(st + 20), display: 'grid', gap: 8 }}>
                 <div style={{ fontSize: 34, fontWeight: 900, color: C.amber }}>Link in our profile</div>
-                <div style={{ fontSize: 30, fontWeight: 700, color: C.pale }}>Today's vote: {c.vote.question}</div>
+                {c.vote && <div style={{ fontSize: 30, fontWeight: 700, color: C.pale }}>{c.vote.open ? `Vote now: ${c.vote.question}` : `At ${fmt(c.vote.from)} citizens: vote on ${c.vote.topic}`}</div>}
               </div>
             </div>
           </>

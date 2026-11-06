@@ -23,7 +23,7 @@ export interface NationCensus {
   ladder: NationRow[];
   target: { iso3: string; name: string; pop: number; year: number } | null;
   passed: { iso3: string; name: string; pop: number } | null;
-  vote: { day: number; topic: string; question: string; options: string[] };
+  vote: { key: string; topic: string; question: string; options: string[]; open: boolean; from: number; votes: number; min: number } | null;
   result: { key: string; answer: string; line: string; votes: number; total: number } | null;
   state: Record<string, string>;
 }

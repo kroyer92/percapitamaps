@@ -41,7 +41,9 @@ export function nationBeats(c: Census): Beat[] {
   if (c.passed && c.target) add('nation:target', `We just passed ${spoken(c.passed.name)}! Next up is ${spoken(c.target.name)}, ${fmt(c.target.pop - c.n)} citizens to go.`, c.target.name);
   else if (c.target) add('nation:target', c.n === 0 ? `Even ${spoken(c.target.name)} has ${fmt(c.target.pop)} people.` : `But we're still smaller than ${spoken(c.target.name)}. ${fmt(c.target.pop - c.n)} citizens to go.`, c.target.name);
   if (c.result) add('nation:voted', `You voted, and ${c.result.line}.`, c.result.answer);
-  add('nation:cta', `Get your free passport with the link in our profile, and vote on ${c.vote.topic}.`, 'GET YOUR PASSPORT');
+  add('nation:cta', !c.vote ? 'Get your free passport with the link in our profile.'
+    : c.vote.open ? `Get your free passport with the link in our profile, and vote on ${c.vote.topic}.`
+    : `Get your free passport with the link in our profile. At ${fmt(c.vote.from)} citizens, you vote on ${c.vote.topic}.`, 'GET YOUR PASSPORT');
   return beats;
 }
 
@@ -66,6 +68,11 @@ export function nationFacts(c: Census): Facts {
   };
 }
 
+function voteBit(c: Census): string {
+  if (!c.vote) return '';
+  return c.vote.open ? ` and vote on ${c.vote.topic}` : ` (at ${fmt(c.vote.from)} citizens we vote on ${c.vote.topic})`;
+}
+
 export function censusStamp(c: Census): string {
   const d = new Date(c.at);
   return `${d.getUTCDate()} ${d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
@@ -80,7 +87,7 @@ export function nationPackaging(c: Census): Packaging {
   const description = [
     summary,
     '',
-    `Get your passport and vote on ${c.vote.topic}: ${page}`,
+    `Get your passport${voteBit(c)}: ${page}`,
     '',
     `Day ${c.day} census: ${fmt(c.n)} citizens from ${c.homelands} countries${c.display ? `; average ${m.label} of their home countries ${c.display} (${c.covered} citizens with data), #${c.rank} of ${c.of + 1}` : ''}.`,
     `Census taken ${censusStamp(c)}.`,
@@ -93,8 +100,8 @@ export function nationPackaging(c: Census): Packaging {
     title: title.length <= 100 ? title : `Day ${c.day}: ${fmt(c.n)} citizens${rankBit} | Per Capita Nation`,
     summary,
     hashtags: ['#shorts', '#percapitanation', '#maps'],
-    pinned_comment: `Get your passport (free, name + country only): ${page}. Today's vote: ${c.vote.question} Results in tomorrow's census.`,
-    ig_caption: `Day ${c.day} of Per Capita Nation: ${fmt(c.n)} citizens${rankBit}. ${cap(c.vote.question)} Vote and get your passport with the link in our bio.`,
+    pinned_comment: `Get your passport (free, name + country only): ${page}.${c.vote ? c.vote.open ? ` Open vote: ${c.vote.question}` : ` At ${fmt(c.vote.from)} citizens we vote on ${c.vote.topic}.` : ''}`,
+    ig_caption: `Day ${c.day} of Per Capita Nation: ${fmt(c.n)} citizens${rankBit}.${c.vote?.open ? ` ${cap(c.vote.question)}` : ''} Get your passport with the link in our bio.`,
     ig_hashtags: ['#percapitanation', '#maps', '#geography', '#data', '#countries'],
     search_tags: ['per capita nation', 'country made of viewers', 'citizen census', 'world bank data', 'per capita', 'country ranking', 'geography'],
     description,

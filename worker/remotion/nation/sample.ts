@@ -19,7 +19,7 @@ export const nationSample: NationProps = {
     homelands: 3, top: [{ iso3: 'USA', name: 'United States', count: 6 }, { iso3: 'IND', name: 'India', count: 4 }, { iso3: 'DNK', name: 'Denmark', count: 2 }],
     citizens: { USA: 6, IND: 4, DNK: 2 }, metric: 'le', year: 2023, avg: 76.5, display: '76.5 years', covered: 12, rank: 100, of: 200,
     ladder: [], target: null, passed: null,
-    vote: { day: 2, topic: 'our flag', question: 'What colours should our flag be?', options: ['Navy and amber', 'Red and white'] },
+    vote: { key: 'flag', topic: 'our flag', question: 'What colours should our flag be?', options: ['Navy and amber', 'Red and white'], open: false, from: 50, votes: 0, min: 20 },
     result: null, state: {},
   },
   iso2: { USA: 'US', IND: 'IN', DNK: 'DK' },

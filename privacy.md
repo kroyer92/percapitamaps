@@ -62,7 +62,7 @@ comments or channel data.
 - Where it is shown: on the page, and possibly in the channel's daily census video on YouTube and
   Instagram (the visitor agrees to this with a tick box before joining).
 - Abuse protection: a salted one-way hash of the visitor's internet address, kept 2 days for
-  sign-ups and 7 days for votes, then deleted. It cannot be turned back into the address.
+  sign-ups, and for votes until the question is decided, then deleted. It cannot be turned back into the address.
 - Deletion: the "Leave the nation" button deletes the passport at once; anyone can also ask by
   email or in a comment. Videos already published are not changed.
 - Country figures come from the World Bank (CC BY 4.0).

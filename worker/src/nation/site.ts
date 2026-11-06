@@ -9,7 +9,7 @@ import express from 'express';
 import { config } from '../config.js';
 import { getSetting, one, q, setSetting } from '../db.js';
 import { countryTable, metricValue, type Metric } from './data.js';
-import { dayNumber, dayTimes, openVoteDay, voteFor, VOTES, FLAG_COLOURS, type Census } from './census.js';
+import { dayNumber, dayTimes, decided, openVote, tallyOf, VOTES, FLAG_COLOURS, type Census } from './census.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pageDir = path.resolve(here, '../../nation-site');
@@ -55,10 +55,8 @@ async function state(): Promise<any> {
     return k ? s / k : null;
   };
   const last = await one<{ day: number; census: Census }>('SELECT day, census FROM nation_days ORDER BY day DESC LIMIT 1');
-  const voteDay = await openVoteDay();
-  const v = voteFor(voteDay);
-  const tally = await q<{ choice: number; n: number }>('SELECT choice, count(*)::int AS n FROM nation_votes WHERE day = $1 GROUP BY choice', [voteDay]);
-  const st = (await getSetting<Record<string, string>>('nation_state')) ?? {};
+  const st = await decided();
+  const v = openVote(st);
   const flagIndex = st.flag ? VOTES[0].options.indexOf(st.flag) : -1;
   const today = dayNumber(new Date());
   const body = {
@@ -69,7 +67,8 @@ async function state(): Promise<any> {
     avg: { gdp: avg('gdp'), le: avg('le') },
     years: table.years,
     lastCensus: last ? { day: last.day, at: last.census.at, n: last.census.n, metric: last.census.metric, rank: last.census.rank, display: last.census.display, of: last.census.of + 1 } : null,
-    vote: { day: voteDay, question: v.question, options: v.options, tally: v.options.map((_, i) => tally.find((t) => t.choice === i)?.n ?? 0) },
+    // Voting opens at NATION_VOTE_FROM citizens; a result needs NATION_VOTE_MIN votes.
+    vote: v ? { key: v.key, question: v.question, options: v.options, tally: await tallyOf(v), open: n >= config.nation.voteFrom, from: config.nation.voteFrom, min: config.nation.voteMin } : null,
     decided: st,
     flag: flagIndex >= 0 ? FLAG_COLOURS[flagIndex] : null,
     countries: table.rows.map((r) => [r.iso3, r.iso2, r.name, r.gdp === undefined ? null : Math.round(r.gdp), r.le === undefined ? null : Math.round(r.le * 10) / 10]),
@@ -150,11 +149,12 @@ nationSite.get('/api/find', async (req, res) => {
 
 // One vote per address on the open question; voting again changes it.
 nationSite.post('/api/vote', async (req, res) => {
-  const day = await openVoteDay();
-  const v = voteFor(day);
+  const v = openVote(await decided());
   const choice = Number(req.body?.choice);
-  if (!Number.isInteger(choice) || choice < 0 || choice >= v.options.length || Number(req.body?.day) !== day) return res.status(400).json({ error: 'That vote has closed. Reload the page for the new question.' });
-  await q(`INSERT INTO nation_votes (day, voter, choice) VALUES ($1, $2, $3) ON CONFLICT (day, voter) DO UPDATE SET choice = $3, at = now()`, [day, await visitor(req), choice]);
+  if (!v || req.body?.key !== v.key || !Number.isInteger(choice) || choice < 0 || choice >= v.options.length) return res.status(400).json({ error: 'That vote has closed. Reload the page for the new question.' });
+  const n = (await one<{ n: number }>('SELECT count(*)::int AS n FROM nation_citizens'))?.n ?? 0;
+  if (n < config.nation.voteFrom) return res.status(400).json({ error: `Voting opens at ${config.nation.voteFrom} citizens.` });
+  await q(`INSERT INTO nation_votes (topic, voter, choice) VALUES ($1, $2, $3) ON CONFLICT (topic, voter) DO UPDATE SET choice = $3, at = now()`, [v.key, await visitor(req), choice]);
   live = undefined;
   res.json((await state()).vote);
 });
@@ -162,5 +162,7 @@ nationSite.post('/api/vote', async (req, res) => {
 // Nightly: drop what is no longer needed (privacy.md).
 export async function nationHousekeeping(): Promise<void> {
   await q(`UPDATE nation_citizens SET ip_hash = NULL WHERE ip_hash IS NOT NULL AND joined_at < now() - interval '2 days'`);
-  await q(`DELETE FROM nation_votes WHERE at < now() - interval '7 days'`);
+  // Votes go once their question is decided.
+  const done = Object.keys(await decided());
+  if (done.length) await q('DELETE FROM nation_votes WHERE topic = ANY($1)', [done]);
 }

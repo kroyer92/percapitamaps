@@ -94,6 +94,10 @@ export const config = {
     playlist: env.PLAYLIST_NATION ?? '',
     igDelayHours: Number(env.NATION_IG_DELAY_HOURS ?? 0),
     joinsPerDay: Number(env.NATION_JOINS_PER_DAY ?? 3), // per address, against spam
+    // Votes wait for villagers: they open at NATION_VOTE_FROM citizens, and a question is only
+    // decided once it has NATION_VOTE_MIN votes; until then it stays open from day to day.
+    voteFrom: Number(env.NATION_VOTE_FROM ?? 50),
+    voteMin: Number(env.NATION_VOTE_MIN ?? 20),
   },
 };
 

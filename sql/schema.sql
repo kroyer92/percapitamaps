@@ -154,13 +154,14 @@ CREATE TABLE IF NOT EXISTS nation_citizens (
 );
 CREATE INDEX IF NOT EXISTS nation_citizens_iso ON nation_citizens (iso3);
 
--- One vote per browser per day on the page's question of the day (nation/census.ts, VOTES).
+-- Votes on the page's open question (nation/census.ts, VOTES: one question at a time, in order).
+-- One vote per address per question; the rows go once the question is decided.
 CREATE TABLE IF NOT EXISTS nation_votes (
-  day      int NOT NULL,
-  voter    text NOT NULL,                      -- salted hash of the address; the rows go after 7 days
+  topic    text NOT NULL,                     -- the question's key: flag, capital, ...
+  voter    text NOT NULL,                     -- salted hash of the address
   choice   int NOT NULL,
   at       timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (day, voter)
+  PRIMARY KEY (topic, voter)
 );
 
 -- One row per daily episode: the census it shows and the Short (a jobs row with format NATION).

@@ -99,10 +99,10 @@ footer a{color:var(--blue)}
   </form>
 
   <div class="card" id="voteCard" hidden>
-    <span class="k">Today's vote</span>
+    <span class="k" id="vkick">Open vote</span>
     <h2 id="vq"></h2>
     <div class="opts" id="vopts"></div>
-    <p class="note" id="vnote">One vote per connection; you can change it until the next census. The result is in the next Short.</p>
+    <p class="note" id="vnote"></p>
   </div>
 
   <div class="card">
@@ -116,11 +116,11 @@ footer a{color:var(--blue)}
     <h2>How it works</h2>
     <div><b>1</b><span>Join here. You get the next citizen number, for good.</span></div>
     <div><b>2</b><span>Every day the census counts everyone and averages the real World Bank figures of your home countries. The Short shows where the nation would rank among real countries, and which real country it has to pass next.</span></div>
-    <div><b>3</b><span>Vote here on the nation's flag, capital, motto and more. Each result is in the next day's Short.</span></div>
+    <div><b>3</b><span>Once we have enough citizens, vote here on the nation's flag, then its capital, motto and more, one at a time. Each result is announced in the Short.</span></div>
     <details id="privacy">
       <summary>Privacy</summary>
       <p>We keep only the name you type and the country you pick, with your citizen number and the time you joined. They are shown on this page and may be shown in the daily video on YouTube and Instagram. No email, no login, no tracking cookies. Your browser keeps a private code so it can show your passport and let you leave.</p>
-      <p>To stop one connection making many passports or votes, a salted one-way hash of your internet address is kept for 2 days (sign-ups) or 7 days (votes), then deleted. Nobody can turn it back into the address.</p>
+      <p>To stop one connection making many passports or votes, a salted one-way hash of your internet address is kept for 2 days (sign-ups), or until the question is decided (votes), then deleted. Nobody can turn it back into the address.</p>
       <p>Leave any time with the "Leave the nation" button: your passport is deleted at once (videos already published can't be changed). Or ask in a comment on any Per Capita Maps video and we'll delete it.</p>
       <p>Country figures: World Bank, World Development Indicators (CC BY 4.0).</p>
     </details>
@@ -169,23 +169,34 @@ function paint() {
 
 function paintVote() {
   const v = S.vote;
-  $('voteCard').hidden = false;
+  $('voteCard').hidden = !v;
+  if (!v) return;
   $('vq').textContent = v.question;
-  const mine = store.get('nation_vote_' + v.day);
   const total = v.tally.reduce((a, b) => a + b, 0);
+  if (!v.open) {
+    // Voting waits for villagers: the question is shown, the buttons come at NATION_VOTE_FROM citizens.
+    $('vkick').textContent = 'First vote';
+    $('vopts').innerHTML = v.options.map((o) => `<div class="li"><span>${esc(o)}</span></div>`).join('');
+    $('vnote').textContent = `Voting opens at ${fmt(v.from)} citizens: ${fmt(Math.max(0, v.from - S.n))} to go. Bring a friend.`;
+    return;
+  }
+  $('vkick').textContent = 'Open vote';
+  const mine = store.get('nation_vote_' + v.key);
   $('vopts').innerHTML = v.options.map((o, i) => {
     const pct = total ? Math.round((v.tally[i] / total) * 100) : 0;
     return `<button type="button" class="opt${mine === String(i) ? ' mine' : ''}" data-i="${i}">${mine !== null ? `<i class="bar" style="width:${pct}%"></i>` : ''}<span>${esc(o)}</span><b>${mine !== null ? pct + '%' : ''}</b></button>`;
   }).join('');
-  $('vnote').textContent = mine !== null ? `${fmt(total)} vote${total === 1 ? '' : 's'} so far. You can change yours until the next census; the result is in the next Short.` : 'One vote per connection. The result is in the next Short.';
+  const need = Math.max(0, v.min - total);
+  $('vnote').textContent = (mine !== null ? `${fmt(total)} vote${total === 1 ? '' : 's'} so far; you can change yours. ` : 'One vote per connection. ')
+    + (need ? `It's decided once it has ${fmt(v.min)} votes (${fmt(need)} to go), in the next census after that.` : 'Enough votes: the next census decides it.');
 }
 
 $('vopts').addEventListener('click', async (e) => {
   const b = e.target.closest('.opt');
   if (!b) return;
   try {
-    S.vote = { ...S.vote, ...(await api('api/vote', { day: S.vote.day, choice: Number(b.dataset.i) })) };
-    store.set('nation_vote_' + S.vote.day, b.dataset.i);
+    S.vote = { ...S.vote, ...(await api('api/vote', { key: S.vote.key, choice: Number(b.dataset.i) })) };
+    store.set('nation_vote_' + S.vote.key, b.dataset.i);
     paintVote();
   } catch (err) { $('vnote').textContent = err.message; }
 });
