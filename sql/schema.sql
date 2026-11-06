@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS comments (
 CREATE TABLE IF NOT EXISTS longforms (
   n            serial PRIMARY KEY,
   theme        text NOT NULL,
-  status       text NOT NULL DEFAULT 'making',   -- making | ready | approved | rejected | failed | published
+  status       text NOT NULL DEFAULT 'making',   -- making | ready | approved | uploading | rejected | failed | published
   datasets     text[],
   packaging    jsonb,                            -- title, title_options, description, tags, pinned_comment
   chapters     jsonb,                            -- [{at: seconds, label}]
@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS longforms (
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE longforms ADD COLUMN IF NOT EXISTS upload_tries int NOT NULL DEFAULT 0;  -- times sent to WF3
 
 -- Per Capita Nation (worker/src/nation): viewers join on the passport page and become numbered
 -- citizens; a daily census Short shows the nation's size and ranks. Only the name a viewer types

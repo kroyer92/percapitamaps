@@ -15,7 +15,7 @@ import { run } from './lib/proc.js';
 import * as office from './activity.js';
 import { studio } from './studio.js';
 import { checkComments } from './comments.js';
-import { linkLongform, longformThumbFailed, makeLongform, weeklyDue } from './longform/make.js';
+import { linkLongform, longformThumbFailed, makeLongform, retryStuckUploads, weeklyDue } from './longform/make.js';
 import { nationSite, nationHousekeeping } from './nation/site.js';
 import { nationTick } from './nation/make.js';
 
@@ -170,6 +170,8 @@ setInterval(() => {
 // The weekly long-form video: Saturday evening, in the same work lane as the Shorts (longform/make.ts).
 let longformQueued = '';
 setInterval(async () => {
+  // A long-form upload that never reported back is sent to WF3 again (longform/make.ts).
+  await retryStuckUploads().catch((e) => console.error('[longform] upload retry', e.message));
   const day = new Date().toISOString().slice(0, 10);
   if (longformQueued === day) return;
   try {
