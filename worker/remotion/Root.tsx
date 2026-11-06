@@ -3,6 +3,9 @@ import { Composition, Still } from 'remotion';
 import { Short } from './Short';
 import { Longform } from './Longform';
 import { Thumb } from './Thumb';
+import { Nation } from './nation/Nation';
+import { nationSample } from './nation/sample';
+import type { NationProps } from './nation/types';
 import { sampleProps } from './sample';
 import type { ShortProps } from './types';
 import type { LongformProps, ThumbProps } from './longform-types';
@@ -32,6 +35,17 @@ export const Root: React.FC = () => (
       durationInFrames={longSample.durationInFrames}
       defaultProps={longSample}
       calculateMetadata={({ props }) => ({ durationInFrames: (props as unknown as LongformProps).durationInFrames })}
+    />
+    {/* Per Capita Nation, the daily census Short (src/nation). */}
+    <Composition
+      id="Nation"
+      component={Nation as React.FC<any>}
+      width={1080}
+      height={1920}
+      fps={30}
+      durationInFrames={nationSample.durationInFrames}
+      defaultProps={nationSample}
+      calculateMetadata={({ props }) => ({ durationInFrames: (props as unknown as NationProps).durationInFrames })}
     />
     <Still id="LongformThumb" component={Thumb as React.FC<any>} width={1280} height={720} defaultProps={thumbSample} />
   </>

@@ -141,3 +141,36 @@ CREATE TABLE IF NOT EXISTS longforms (
   updated_at   timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE longforms ADD COLUMN IF NOT EXISTS upload_tries int NOT NULL DEFAULT 0;  -- times sent to WF3
+
+-- Per Capita Nation (worker/src/nation): viewers join on the passport page and become numbered
+-- citizens; a daily census Short shows the nation's size and ranks. Only the name a viewer types
+-- and the country they pick are stored (privacy.md). Leaving deletes the row; numbers are not reused.
+CREATE TABLE IF NOT EXISTS nation_citizens (
+  no         serial PRIMARY KEY,                -- the citizen number on the passport
+  name       text NOT NULL,
+  iso3       text NOT NULL,
+  code       text NOT NULL UNIQUE,              -- secret kept in the viewer's browser: show or leave
+  ip_hash    text,                              -- salted hash, only to limit sign-ups; cleared after 2 days
+  joined_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS nation_citizens_iso ON nation_citizens (iso3);
+
+-- Votes on the page's open question (nation/census.ts, VOTES: one question at a time, in order).
+-- One vote per address per question; the rows go once the question is decided.
+CREATE TABLE IF NOT EXISTS nation_votes (
+  topic    text NOT NULL,                     -- the question's key: flag, capital, ...
+  voter    text NOT NULL,                     -- salted hash of the address
+  choice   int NOT NULL,
+  at       timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (topic, voter)
+);
+
+-- One row per daily episode: the census it shows and the Short (a jobs row with format NATION).
+CREATE TABLE IF NOT EXISTS nation_days (
+  day        int PRIMARY KEY,
+  census_at  timestamptz NOT NULL,
+  census     jsonb NOT NULL,
+  slot_at    timestamptz NOT NULL,
+  job_id     bigint REFERENCES jobs(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);

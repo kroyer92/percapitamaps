@@ -80,7 +80,7 @@ export async function autoTune(): Promise<string[]> {
   const rows = await q<{ hook_type: string | null; length_band: string | null; engaged: number | null }>(
     `SELECT DISTINCT ON (j.id) j.hook_type, j.length_band, COALESCE(m.engaged_views, m.views) AS engaged
      FROM jobs j JOIN metrics m ON m.job_id = j.id
-     WHERE j.published_at > now() - interval '28 days' AND m.win IN ('72h','7d')
+     WHERE j.published_at > now() - interval '28 days' AND m.win IN ('72h','7d') AND j.format <> 'NATION'
      ORDER BY j.id, CASE m.win WHEN '7d' THEN 1 ELSE 2 END`);
   const all = rows.map((r) => r.engaged).filter((x): x is number => x !== null);
   const med = quantile(all, 0.5);

@@ -13,6 +13,7 @@ services:
     environment:
       RENDERS_DIR: /opt/percapita/renders
       MUSIC_DIR: /opt/percapita/app/music
+      NATION_DOMAIN: ${NATION_DOMAIN:-}   # Per Capita Nation's page address (README)
     volumes:
       - ./renders:/opt/percapita/renders
       - ./public:/opt/percapita/public
@@ -41,10 +42,11 @@ services:
     volumes:
       - ./app/n8n/workflows:/import/workflows:ro
 
-  # The studio page: Caddy needs the address for the studio block in the Caddyfile (README).
+  # The studio page and the Per Capita Nation page: Caddy needs their addresses (README).
   caddy:
     environment:
       STUDIO_DOMAIN: ${STUDIO_DOMAIN:-studio.invalid}
+      NATION_DOMAIN: ${NATION_DOMAIN:-nation.invalid}
 
 volumes:
   worker_models: {}

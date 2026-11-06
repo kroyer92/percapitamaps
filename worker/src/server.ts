@@ -16,6 +16,8 @@ import * as office from './activity.js';
 import { studio } from './studio.js';
 import { checkComments } from './comments.js';
 import { linkLongform, longformThumbFailed, makeLongform, retryStuckUploads, weeklyDue } from './longform/make.js';
+import { nationSite, nationHousekeeping } from './nation/site.js';
+import { nationTick } from './nation/make.js';
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -118,6 +120,9 @@ app.post('/comments/youtube', (req, res) => {
 // The office page (Caddy puts it at STUDIO_DOMAIN behind a password).
 app.use('/studio', studio);
 
+// Per Capita Nation's passport page (Caddy publishes only /nation at NATION_DOMAIN, see the README).
+app.use('/nation', nationSite);
+
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
   res.status(500).json({ error: String(err?.message ?? err) });
@@ -127,6 +132,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 async function housekeeping() {
   try {
     await cleanupOldRenders();
+    await nationHousekeeping();
     for (const sub of ['yt', 'ig']) {
       const dir = path.join(config.mediaDir, sub);
       for (const f of await fs.readdir(dir).catch(() => [] as string[])) {
@@ -177,6 +183,9 @@ setInterval(async () => {
     console.error('[longform] weekly check', e.message);
   }
 }, 10 * 60_000);
+
+// Per Capita Nation: the daily census when it's due, and the episode's approval before its slot.
+setInterval(() => { nationTick().catch((e) => console.error('[nation]', e.message)); }, 2 * 60_000);
 
 // Jobs that were mid-production when the worker restarted would otherwise hang forever.
 async function recoverInterrupted() {

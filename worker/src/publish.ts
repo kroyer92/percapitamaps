@@ -3,13 +3,14 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { config, FORMAT_NAMES, type Format } from './config.js';
+import { config, FORMAT_NAMES, isNation, type Format } from './config.js';
 import { one, q, getSetting, setSetting } from './db.js';
 import { buildDescription, hideAnswer, seriesTitle } from './content.js';
 import { esc, say } from './telegram.js';
 import { fmtIn, upcomingSlots } from './lib/time.js';
 import type { JobRow } from './produce.js';
 import * as office from './activity.js';
+import { approveNation } from './nation/make.js';
 
 const PLAYLIST_NAMES: Record<Format, string> = {
   MAP_REVEAL: 'Map Reveals', COUNTDOWN: 'Top 10 Countdowns', THEN_NOW: 'Then vs Now', SCALE: 'If the World Were 100 People', GUESS: 'Guess the Country',
@@ -30,6 +31,8 @@ export async function approve(id: number): Promise<void> {
     await say(`#${id} is already ${job.status}.`);
     return;
   }
+  // Per Capita Nation episodes keep their own daily slot and packaging (nation/make.ts).
+  if (isNation(job.format)) return approveNation(job);
   const slot = await nextSlot();
   const series = config.seriesNaming
     ? ((await one<{ n: number }>(`SELECT count(*)::int AS n FROM jobs WHERE format = $1 AND series_no IS NOT NULL`, [job.format]))?.n ?? 0) + 1
@@ -66,7 +69,7 @@ export async function approve(id: number): Promise<void> {
   ].join('\n'));
 }
 
-async function handToN8n(job: JobRow, packaging: JobRow['packaging'] & { description: string }, slot: Date): Promise<void> {
+export async function handToN8n(job: JobRow, packaging: JobRow['packaging'] & { description: string }, slot: Date, playlist?: string | null): Promise<void> {
   const name = `${crypto.randomBytes(12).toString('hex')}.mp4`;
   await fs.mkdir(path.join(config.mediaDir, 'yt'), { recursive: true });
   await fs.copyFile(job.video_path!, path.join(config.mediaDir, 'yt', name));
@@ -77,7 +80,7 @@ async function handToN8n(job: JobRow, packaging: JobRow['packaging'] & { descrip
     description: packaging.description,
     tags: packaging.search_tags,
     publish_at: slot.toISOString(),
-    playlist_id: config.playlists[job.format] || null,
+    playlist_id: playlist !== undefined ? playlist : config.playlists[job.format] || null,
     pinned_comment: packaging.pinned_comment,
     category_id: '27',
   };
@@ -96,15 +99,16 @@ export async function linkVideo(id: number, videoId: string, url?: string): Prom
   // Uploads are scheduled for the pack's slot, so that is when it went live, also when an older
   // video is linked days later (its 24h/72h/7d windows then line up with the real publish time).
   const publishedAt = job.slot_at ? new Date(job.slot_at) : new Date();
+  const igDelay = isNation(job.format) ? config.nation.igDelayHours : config.instagramDelayHours;
   await q(
     `UPDATE jobs SET status = 'published', youtube_video_id = $2, youtube_url = $3, published_at = $4,
        ig_due_at = $4::timestamptz + make_interval(hours => $5), updated_at = now() WHERE id = $1`,
-    [id, videoId, url ?? `https://youtube.com/shorts/${videoId}`, publishedAt, config.instagramDelayHours],
+    [id, videoId, url ?? `https://youtube.com/shorts/${videoId}`, publishedAt, igDelay],
   );
   await q(`UPDATE datasets SET last_used_at = now() WHERE id = (SELECT dataset_id FROM topics WHERE id = $1)`, [job.topic_id]);
   await q(`UPDATE topics SET status = 'done' WHERE id = $1`, [job.topic_id]);
   office.finished('publisher', `#${id} is live on YouTube`, id);
-  return `🔗 Linked #${id} to ${videoId}. Analytics will track it${config.instagramToken ? `, and Instagram posts it ${config.instagramDelayHours} hours after it goes live` : ''}.`;
+  return `🔗 Linked #${id} to ${videoId}. Analytics will track it${config.instagramToken ? `, and Instagram posts it ${igDelay} hours after it goes live` : ''}.`;
 }
 
 // ---------- Instagram (WF4) ----------
