@@ -310,7 +310,28 @@ export async function approveLongform(n: number): Promise<void> {
   const p = lf.packaging;
   const link = (f: string) => `https://${config.mediaDomain}/longform/${f}`;
   const slot = publishSlot();
-  const related: RelatedShort[] = lf.related ?? [];
+  const when = `<b>${fmtIn(slot, config.localTz)} your time</b> (${fmtIn(slot, config.slotTz)} US Eastern)`;
+  if (config.youtubeApiUploads) {
+    // The same n8n workflow as the Shorts (WF3): upload, schedule, playlist, comment, thumbnail.
+    // It reports back on /jobs/L<n>/youtube, which links the video here.
+    try {
+      const res = await fetch(config.n8nApprovedWebhook, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(30_000),
+        body: JSON.stringify({
+          job_id: `L${n}`, file_url: link(lf.public_files.video), thumb_url: link(lf.public_files.thumb),
+          title: p.title, description: p.description, tags: p.tags, publish_at: slot.toISOString(),
+          playlist_id: config.playlistLongform || null, pinned_comment: p.pinned_comment, category_id: '27',
+        }),
+      });
+      if (!res.ok) throw new Error(`n8n WF3 webhook answered ${res.status}. Is WF3 active?`);
+      await q(`UPDATE longforms SET status = 'uploading', updated_at = now() WHERE n = $1`, [n]);
+      office.working('publisher', `Uploading long-form #${n}`);
+      await say(`✅ Approved long-form #${n}. Uploading through the YouTube API with its title, description, tags, thumbnail and comment, scheduled for ${when}. Nothing for you to do; a message comes when it's on YouTube.`);
+      return;
+    } catch (e: any) {
+      await say(`⚠️ The automatic upload of long-form #${n} didn't start: ${esc(String(e.message ?? e))}\nThe steps to do it by hand follow, so the slot is still kept.`);
+    }
+  }
   await say([
     `✅ <b>Approved long-form #${n}</b>. Do these steps on your PC (about 15 minutes):`,
     '',
@@ -319,15 +340,23 @@ export async function approveLongform(n: number): Promise<void> {
     '<b>3.</b> YouTube Studio → Create → Upload videos → pick the video.',
     '<b>4.</b> Paste the title and description below, and upload the thumbnail.',
     '<b>5.</b> Audience: No, it\'s not made for kids. Show more → Tags: paste the tags. Altered content: No.',
-    '<b>6.</b> Video elements → End screen → Add → pick "1 video, 1 subscribe" → video: "Best for viewer". Save.',
-    `<b>7.</b> Visibility → Schedule → <b>${fmtIn(slot, config.localTz)} your time</b> (${fmtIn(slot, config.slotTz)} US Eastern) → Schedule.`,
-    `<b>8.</b> When it's scheduled, copy its link and send: <code>/link L${n} </code>followed by the link.`,
+    `<b>6.</b> Visibility → Schedule → ${when} → Schedule.`,
+    `<b>7.</b> When it's scheduled, copy its link and send: <code>/link L${n} </code>followed by the link.`,
     '',
     '<b>Title</b>', `<code>${esc(p.title)}</code>`,
     '', '<b>Description</b>', `<pre>${esc(p.description)}</pre>`,
     '', '<b>Tags</b>', `<code>${esc(p.tags.join(', '))}</code>`,
-    '', '<b>Comment to post and pin</b> (after it goes live)', `<code>${esc(p.pinned_comment)}</code>`,
-    ...(related.length ? ['', `<b>After it goes live:</b> on each of these Shorts, Studio → Details → Related video → pick this long-form video:`, ...related.map((r) => `• ${esc(r.title ?? `#${r.job_id}`)} ${esc(r.url)}`)] : []),
+    '', '<b>Comment to post</b> (after it goes live)', `<code>${esc(p.pinned_comment)}</code>`,
+  ].join('\n'));
+}
+
+// Called when WF3 could not set the thumbnail: everything else is uploaded.
+export async function longformThumbFailed(n: number, videoId: string): Promise<void> {
+  const lf = await one<any>('SELECT * FROM longforms WHERE n = $1', [n]);
+  if (!lf) return;
+  await say([
+    `⚠️ Long-form #${n} is uploaded and scheduled, but YouTube refused its thumbnail (custom thumbnails need a phone-verified channel: youtube.com/verify).`,
+    `To add it by hand: download https://${config.mediaDomain}/longform/${lf.public_files?.thumb}, then Studio → Content → the video${videoId ? ` (https://youtu.be/${videoId})` : ''} → Details → Thumbnail → Upload file → Save.`,
   ].join('\n'));
 }
 
@@ -339,11 +368,19 @@ export async function rejectLongform(n: number): Promise<void> {
   await say(`❌ Rejected long-form #${n}. Send /longform to make another, or /longform money (or health, food, work, people, energy, tech, nature) for a theme of your choice.`);
 }
 
-export async function linkLongform(n: number, url: string): Promise<string> {
+export async function linkLongform(n: number, url: string, uploaded = false): Promise<string> {
   const lf = await one<any>('SELECT * FROM longforms WHERE n = $1', [n]);
   if (!lf) return `There is no long-form #${n}.`;
   await q(`UPDATE longforms SET status = 'published', youtube_url = $2, updated_at = now() WHERE n = $1`, [n, url]);
-  return `🔗 Linked long-form #${n} to ${esc(url)}. Next week's long-form is made on Saturday evening.`;
+  office.finished('publisher', `Long-form #${n} is on YouTube`);
+  const related: RelatedShort[] = lf.related ?? [];
+  return [
+    uploaded ? `📺 Long-form #${n} is uploaded and scheduled: ${esc(url)}` : `🔗 Linked long-form #${n} to ${esc(url)}.`,
+    'Next week\'s long-form is made on Saturday evening.',
+    // YouTube's API has no setting for a Short's "Related video" or for end screens, so these stay
+    // optional hand steps that help the long-form get views.
+    ...(related.length ? ['', `<b>Optional, 2 min, helps it get views:</b> on each of these Shorts, Studio → Details → Related video → pick this long-form:`, ...related.map((r) => `• ${esc(r.title ?? `#${r.job_id}`)} ${esc(r.url)}`)] : []),
+  ].join('\n');
 }
 
 // The weekly run: Saturday from 21:00 in LOCAL_TZ, once a week, unless LONGFORM_AUTO=off.

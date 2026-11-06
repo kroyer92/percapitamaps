@@ -15,7 +15,7 @@ import { run } from './lib/proc.js';
 import * as office from './activity.js';
 import { studio } from './studio.js';
 import { checkComments } from './comments.js';
-import { makeLongform, weeklyDue } from './longform/make.js';
+import { linkLongform, longformThumbFailed, makeLongform, weeklyDue } from './longform/make.js';
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -60,11 +60,24 @@ app.post('/instagram/run', async (_req, res) => {
 
 // WF3 (after the API audit): n8n uploaded the video and reports its id.
 app.post('/jobs/:id/youtube', async (req, res) => {
-  const id = Number(req.params.id);
   const videoId = String(req.body?.video_id ?? '');
   if (!videoId) return res.status(400).json({ error: 'video_id missing' });
+  // Long-form videos come back as "L<n>".
+  const lf = /^L(\d+)$/i.exec(req.params.id);
+  if (lf) {
+    await say(await linkLongform(Number(lf[1]), `https://youtu.be/${videoId}`, true));
+    return res.json({ ok: true });
+  }
+  const id = Number(req.params.id);
   const msg = await linkVideo(id, videoId);
   await say(`${msg}\nPin the comment once it's live.`);
+  res.json({ ok: true });
+});
+
+// WF3 could not set the long-form's thumbnail (YouTube refused it, or the download failed).
+app.post('/jobs/:id/thumbnail-failed', async (req, res) => {
+  const lf = /^L(\d+)$/i.exec(req.params.id);
+  if (lf) await longformThumbFailed(Number(lf[1]), String(req.body?.video_id ?? ''));
   res.json({ ok: true });
 });
 
