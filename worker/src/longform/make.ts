@@ -322,7 +322,7 @@ export async function makeLongform(opts: { theme?: string; maps?: number } = {})
 
 async function rm(p: string) { await fs.rm(p, { recursive: true, force: true }).catch(() => undefined); }
 
-export async function approveLongform(n: number): Promise<void> {
+export async function approveLongform(n: number, opts: { manual?: boolean } = {}): Promise<void> {
   const lf = await one<any>('SELECT * FROM longforms WHERE n = $1', [n]);
   if (!lf) return;
   if (lf.status !== 'ready') { await say(`Long-form #${n} is already ${lf.status}.`); return; }
@@ -331,21 +331,9 @@ export async function approveLongform(n: number): Promise<void> {
   const link = (f: string) => `https://${config.mediaDomain}/longform/${f}`;
   const slot = publishSlot();
   const when = `<b>${fmtIn(slot, config.localTz)} your time</b> (${fmtIn(slot, config.slotTz)} US Eastern)`;
-  if (config.youtubeApiUploads) {
-    // The same n8n workflow as the Shorts (WF3): upload, schedule, playlist, comment, thumbnail.
-    // It reports back on /jobs/L<n>/youtube, which links the video here.
+  if (config.youtubeApiUploads && !opts.manual) {
     try {
-      const res = await fetch(config.n8nApprovedWebhook, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(30_000),
-        body: JSON.stringify({
-          job_id: `L${n}`, file_url: link(lf.public_files.video), thumb_url: link(lf.public_files.thumb),
-          title: p.title, description: p.description, tags: p.tags, publish_at: slot.toISOString(),
-          playlist_id: config.playlistLongform || null, pinned_comment: p.pinned_comment, category_id: '27',
-        }),
-      });
-      if (!res.ok) throw new Error(`n8n WF3 webhook answered ${res.status}. Is WF3 active?`);
-      await q(`UPDATE longforms SET status = 'uploading', updated_at = now() WHERE n = $1`, [n]);
-      office.working('publisher', `Uploading long-form #${n}`);
+      await sendToYoutube(lf, slot);
       await say(`✅ Approved long-form #${n}. Uploading through the YouTube API with its title, description, tags, thumbnail and comment, scheduled for ${when}. Nothing for you to do; a message comes when it's on YouTube.`);
       return;
     } catch (e: any) {
@@ -378,6 +366,49 @@ export async function longformThumbFailed(n: number, videoId: string): Promise<v
     `⚠️ Long-form #${n} is uploaded and scheduled, but YouTube refused its thumbnail (custom thumbnails need a phone-verified channel: youtube.com/verify).`,
     `To add it by hand: download https://${config.mediaDomain}/longform/${lf.public_files?.thumb}, then Studio → Content → the video${videoId ? ` (https://youtu.be/${videoId})` : ''} → Details → Thumbnail → Upload file → Save.`,
   ].join('\n'));
+}
+
+// The same n8n workflow as the Shorts (WF3): upload, schedule, playlist, comment, thumbnail.
+// It reports back on /jobs/L<n>/youtube, which links the video here.
+async function sendToYoutube(lf: any, slot: Date): Promise<void> {
+  const n = lf.n;
+  const p = lf.packaging;
+  const link = (f: string) => `https://${config.mediaDomain}/longform/${f}`;
+  const res = await fetch(config.n8nApprovedWebhook, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(30_000),
+    body: JSON.stringify({
+      job_id: `L${n}`, file_url: link(lf.public_files.video), thumb_url: link(lf.public_files.thumb),
+      title: p.title, description: p.description, tags: p.tags, publish_at: slot.toISOString(),
+      playlist_id: config.playlistLongform || null, pinned_comment: p.pinned_comment, category_id: '27',
+    }),
+  });
+  if (!res.ok) throw new Error(`n8n WF3 webhook answered ${res.status}. Is WF3 active?`);
+  await q(`UPDATE longforms SET status = 'uploading', upload_tries = upload_tries + 1, updated_at = now() WHERE n = $1`, [n]);
+  office.working('publisher', `Uploading long-form #${n}`);
+}
+
+// An upload that hasn't reported back after 90 minutes failed in n8n (a dropped connection to
+// YouTube, say). Nothing was created on YouTube then, so it is sent again, up to 3 times in all.
+// Only after that does Niko get the steps to do it by hand.
+export async function retryStuckUploads(): Promise<void> {
+  if (!config.youtubeApiUploads) return;
+  const stuck = await q<any>(`SELECT * FROM longforms WHERE status = 'uploading' AND updated_at < now() - interval '90 minutes'`);
+  for (const lf of stuck) {
+    if (lf.upload_tries < 3) {
+      const slot = publishSlot();
+      try {
+        await sendToYoutube(lf, slot);
+        await say(`🔁 The upload of long-form #${lf.n} didn't finish, so I started it again (try ${lf.upload_tries + 1} of 3), still scheduled for <b>${fmtIn(slot, config.localTz)} your time</b>. Nothing for you to do.`);
+      } catch (e: any) {
+        console.error(`[longform ${lf.n}] re-upload`, e.message);
+        await q(`UPDATE longforms SET upload_tries = upload_tries + 1, updated_at = now() WHERE n = $1`, [lf.n]);
+      }
+      continue;
+    }
+    await q(`UPDATE longforms SET status = 'ready', upload_tries = 0, updated_at = now() WHERE n = $1`, [lf.n]);
+    await say(`⚠️ Long-form #${lf.n} failed to upload 3 times, so here are the steps to upload it by hand.`);
+    await approveLongform(lf.n, { manual: true });
+  }
 }
 
 export async function rejectLongform(n: number): Promise<void> {

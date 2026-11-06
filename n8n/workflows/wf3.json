@@ -69,7 +69,10 @@
           "defaultLanguage": "en",
           "notifySubscribers": true
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
     },
     {
       "id": "13854e05-081d-4157-9044-c62d5e8f8ec3",
