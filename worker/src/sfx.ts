@@ -78,6 +78,11 @@ export function sfxCues(p: ShortProps): SfxCue[] {
 
 // Mixes every cue into one mono track the length of the video. Returns undefined when SFX=off.
 export async function buildSfxTrack(p: ShortProps, seconds: number, workDir: string): Promise<string | undefined> {
+  return mixSfx(sfxCues(p), seconds, workDir);
+}
+
+// The same mix for any list of cues (Per Capita Nation places its own).
+export async function mixSfx(cues: SfxCue[], seconds: number, workDir: string): Promise<string | undefined> {
   if ((process.env.SFX ?? 'on').toLowerCase() === 'off') return undefined;
   const gain = Number(process.env.SFX_GAIN ?? 1) || 1;
   const files = await makeSounds(path.join(workDir, 'sfx'));
@@ -86,7 +91,7 @@ export async function buildSfxTrack(p: ShortProps, seconds: number, workDir: str
   const peak = (d: Int16Array) => d.reduce((m, x) => Math.max(m, Math.abs(x)), 1);
   const norm = Object.fromEntries((Object.keys(pcm) as Sound[]).map((k) => [k, 29000 / peak(pcm[k])])) as Record<Sound, number>;
   const mix = new Float32Array(Math.ceil(seconds * RATE));
-  for (const c of sfxCues(p)) {
+  for (const c of cues) {
     const src = pcm[c.sound];
     const at = Math.round(c.at * RATE);
     const g = GAIN[c.sound] * norm[c.sound] * gain;

@@ -1,6 +1,6 @@
 # Per Capita Maps Studio – Privacy Policy
 
-Last updated: 5 November 2026
+Last updated: 6 November 2026
 
 Per Capita Maps Studio ("the tool") is a private tool operated by the owner of the YouTube channel
 "Per Capita Maps" (@PerCapitaMaps). It uploads videos to, and reads analytics for, that one channel only.
@@ -44,12 +44,28 @@ Apart from that weekly summary, the data is never sold, shared with third partie
 
 ## Cookies and devices
 
-The tool runs only on the owner's server. It does not place cookies or store information on any visitor's device.
+The tool runs only on the owner's server. It does not place cookies. The one public page, the Per Capita Nation passport page (below), keeps a random code and the visitor's vote choice in the visitor's own browser storage, so it can show their passport and their vote; nothing else is stored on any visitor's device.
 
 ## Revoking access
 
 Access can be revoked at any time on the Google security settings page:
 [https://myaccount.google.com/permissions](https://myaccount.google.com/permissions).
+
+## Per Capita Nation passport page
+
+Per Capita Nation is a game on the channel: viewers can join a made-up country on a web page run by
+the owner. It does not use the YouTube API Services or any YouTube data; nobody is added from
+comments or channel data.
+
+- What is stored: the name the visitor types and the country they pick, with their citizen number
+  and the time they joined, and their vote in the page's daily poll. No email, no login, no tracking.
+- Where it is shown: on the page, and possibly in the channel's daily census video on YouTube and
+  Instagram (the visitor agrees to this with a tick box before joining).
+- Abuse protection: a salted one-way hash of the visitor's internet address, kept 2 days for
+  sign-ups and 7 days for votes, then deleted. It cannot be turned back into the address.
+- Deletion: the "Leave the nation" button deletes the passport at once; anyone can also ask by
+  email or in a comment. Videos already published are not changed.
+- Country figures come from the World Bank (CC BY 4.0).
 
 ## Contact
 

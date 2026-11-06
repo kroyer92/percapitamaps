@@ -285,7 +285,7 @@ export async function swapHook(id: number, index: number): Promise<void> {
 
 export async function cleanupOldRenders(): Promise<void> {
   const old = await q<{ id: number }>(
-    `SELECT id FROM jobs WHERE status IN ('published','rejected','render_failed','needs_human','dead_letter') AND updated_at < now() - interval '14 days' AND video_path IS NOT NULL`);
+    `SELECT id FROM jobs WHERE status IN ('published','rejected','render_failed','needs_human','dead_letter','test') AND updated_at < now() - interval '14 days' AND video_path IS NOT NULL`);
   for (const { id } of old) {
     await fs.rm(jobDir(id), { recursive: true, force: true });
     await fs.rm(jobVideo(id), { force: true });

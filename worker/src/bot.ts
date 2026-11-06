@@ -1,6 +1,6 @@
 // The Telegram bot: buttons on previews plus a few commands. Long-polls Telegram, so it
 // needs no webhook and doesn't clash with n8n.
-import { config } from './config.js';
+import { config, isNation } from './config.js';
 import { one, q, getSetting, setSetting } from './db.js';
 import { tg, say, esc } from './telegram.js';
 import { queue } from './lib/queue.js';
@@ -11,6 +11,7 @@ import { fmtIn } from './lib/time.js';
 import { setTune } from './tune.js';
 import { approveLongform, linkLongform, makeLongform, rejectLongform } from './longform/make.js';
 import { THEMES } from './longform/themes.js';
+import { nationCommand } from './nation/make.js';
 import { applyOpening, openingKeyboard, openingTest, videosOverview } from './analytics.js';
 
 const HELP = [
@@ -24,6 +25,7 @@ const HELP = [
   '/videos – every recent video, its link and its scorecards',
   '/tune [on|off|reset] – see or undo the weekly hook/length auto-tuning',
   '/opening – how the Map Reveal opening test is going, and whether it can be read yet',
+  '/nation [test|make|remove n] – Per Capita Nation: citizens, vote, the daily episode',
   '/status – queue, waiting approvals and next slots',
   '/help – this list',
 ].join('\n');
@@ -92,6 +94,9 @@ async function onMessage(text: string): Promise<void> {
       await queueFollowup(id);
       return;
     }
+    case '/nation':
+      await say(await nationCommand(args));
+      return;
     case '/videos':
       await say(await videosOverview());
       return;
@@ -134,8 +139,8 @@ async function onCallback(cb: any): Promise<void> {
     if (job.status !== 'awaiting_approval') { await say(`#${id} is already ${job.status}.`); return; }
     await clearButtons();
     await q(`UPDATE jobs SET status = 'rejected', updated_at = now() WHERE id = $1`, [id]);
-    await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [job.topic_id]);
-    await say(`❌ Rejected #${id}.`);
+    if (job.topic_id) await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [job.topic_id]);
+    await say(`❌ Rejected #${id}.${isNation(job.format) ? ' Nothing goes up today. Send /nation make to make it again.' : ''}`);
   } else if (kind === 'fu') {
     await clearButtons();
     await queueFollowup(id);
@@ -163,6 +168,7 @@ export async function startBot(): Promise<void> {
       { command: 'tune', description: 'See or undo auto-tuning: /tune off' },
       { command: 'longform', description: 'Make the long-form video now' },
       { command: 'opening', description: 'Map Reveal opening test: can it be read yet?' },
+      { command: 'nation', description: 'Per Capita Nation: citizens, vote, episode' },
       { command: 'help', description: 'All commands' },
     ],
   }).catch(() => undefined);

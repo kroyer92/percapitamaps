@@ -4,13 +4,14 @@
 // Add a line here whenever a merged and deployed change alters how videos look or sound.
 import type { Format } from './config.js';
 
-export interface Change { at: string; label: string; formats: Format[] | 'all' }
+export interface Change { at: string; label: string; formats: (Format | 'NATION')[] | 'all' }
 
 export const CHANGES: Change[] = [
   { at: '2026-10-26T09:00:00Z', label: 'Build 1 visuals (map motion, captions, sound effects)', formats: 'all' },
   { at: '2026-10-28T15:30:00Z', label: 'Countdown and Guess upgrade', formats: ['COUNTDOWN', 'GUESS'] },
   { at: '2026-10-29T09:49:00Z', label: 'Map Reveal guess beat cut, #1 kept out of titles', formats: 'all' },
   { at: '2026-10-30T12:09:00Z', label: 'Map Reveal opening test (rank strip vs classic)', formats: ['MAP_REVEAL'] },
+  { at: '2026-11-06T12:00:00Z', label: 'Per Capita Nation daily census (first version)', formats: ['NATION'] },
 ];
 
 const applies = (c: Change, format: string) => c.formats === 'all' || (c.formats as string[]).includes(format);

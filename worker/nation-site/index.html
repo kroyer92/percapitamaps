@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Per Capita Nation</title>
+<meta name="description" content="A country built by the viewers of Per Capita Maps. Get your passport, vote, and see where the nation ranks among real countries.">
+<meta property="og:title" content="Per Capita Nation">
+<meta property="og:description" content="A country built by its viewers. Get your passport.">
+<meta name="theme-color" content="#0a1d2b">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f2a3d'/%3E%3Cellipse cx='32' cy='36' rx='20' ry='16' fill='%232f78a6' stroke='%23d9ecf7' stroke-width='2'/%3E%3Ccircle cx='32' cy='34' r='5' fill='%23f0b04a'/%3E%3C/svg%3E">
+<style>
+@font-face{font-family:Inter;font-weight:500;font-display:swap;src:url(fonts/inter-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:700;font-display:swap;src:url(fonts/inter-latin-700-normal.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:800;font-display:swap;src:url(fonts/inter-latin-800-normal.woff2) format('woff2')}
+@font-face{font-family:Inter;font-weight:900;font-display:swap;src:url(fonts/inter-latin-900-normal.woff2) format('woff2')}
+/* Channel look: navy, pale blue, amber. One phone-first column: header, stats, passport (or the
+   form to get one), today's vote, find a passport, how it works and privacy. */
+:root{--bg:#0a1d2b;--panel:#0f2a3d;--line:rgba(111,179,224,.22);--pale:#d9ecf7;--blue:#6fb3e0;--amber:#f0b04a;--muted:#8fb0c4;--ink:#1c1300;--bad:#ff9b7a;--good:#7fd8a0;--font:Inter,system-ui,-apple-system,sans-serif;color-scheme:dark}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--pale);font-family:var(--font);font-size:16px;line-height:1.5;background-image:linear-gradient(rgba(111,179,224,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(111,179,224,.06) 1px,transparent 1px);background-size:40px 40px}
+.wrap{max-width:480px;margin:0 auto;padding-block:24px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:18px}
+header{text-align:center;display:grid;gap:6px}
+.k{font-size:.75rem;font-weight:800;letter-spacing:.22em;color:var(--blue);text-transform:uppercase}
+h1{margin:0;font-size:2rem;font-weight:900;line-height:1.05;text-wrap:balance}
+.sub{color:var(--muted);font-size:.92rem}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--panel);border-radius:12px;padding:10px 6px;text-align:center;box-shadow:inset 0 0 0 1px var(--line)}
+.stat b{display:block;font-size:1.35rem;font-weight:900;color:var(--amber);font-variant-numeric:tabular-nums}
+.stat span{font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+.card{background:var(--panel);border-radius:16px;padding:18px;display:grid;gap:12px;box-shadow:inset 0 0 0 1px var(--line)}
+.card h2{margin:0;font-size:1.2rem;font-weight:900}
+label{font-size:.8rem;font-weight:700;color:var(--muted);display:grid;gap:6px}
+input,select{font:inherit;font-size:16px;color:var(--pale);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px 12px;width:100%}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.check{display:flex;gap:10px;align-items:flex-start;font-weight:500;color:var(--pale);font-size:.86rem}
+.check input{width:auto;margin-top:4px;flex:none}
+button{font:inherit;font-weight:900;border:0;border-radius:12px;padding:13px;background:var(--amber);color:var(--ink);cursor:pointer;font-size:1rem}
+button[disabled]{opacity:.6;cursor:default}
+button.sec{background:transparent;color:var(--pale);box-shadow:inset 0 0 0 1px var(--line);font-weight:700}
+button.link{background:none;color:var(--muted);padding:4px;font-weight:700;font-size:.82rem;text-decoration:underline}
+.err{color:var(--bad);font-size:.86rem;min-height:1.2em}
+.pass{background:var(--panel);border-radius:18px;padding:20px;display:grid;gap:10px;box-shadow:0 0 0 3px var(--amber),0 20px 50px rgba(0,0,0,.45)}
+.pass .top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.num{font-size:2.6rem;font-weight:900;color:var(--amber);line-height:1;font-variant-numeric:tabular-nums}
+.nm{font-size:1.3rem;font-weight:900;overflow-wrap:anywhere}
+.flag{font-size:2.2rem;line-height:1}
+.ourflag{width:42px;height:28px;border-radius:4px;display:grid;grid-template-rows:1fr 1fr;overflow:hidden;box-shadow:0 0 0 1px rgba(255,255,255,.25);flex:none}
+.ourflag.q{background:#fff;color:#0f2a3d;place-items:center;font-weight:900;grid-template-rows:none}
+.row{display:flex;justify-content:space-between;gap:10px;border-top:1px solid var(--line);padding-top:8px;font-size:.95rem}
+.row span{color:var(--muted)}
+.row b{text-align:right;font-variant-numeric:tabular-nums}
+.up{color:var(--good)}.down{color:var(--bad)}
+.stamp{justify-self:end;border:3px solid var(--amber);color:var(--amber);border-radius:8px;padding:2px 10px;font-weight:900;font-size:.8rem;letter-spacing:.1em;transform:rotate(-6deg)}
+.opts{display:grid;gap:8px}
+.opt{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;text-align:left;background:var(--bg);color:var(--pale);box-shadow:inset 0 0 0 1px var(--line);font-weight:800;position:relative;overflow:hidden;padding:12px 14px}
+.opt .bar{position:absolute;inset:0 auto 0 0;background:rgba(240,176,74,.18);z-index:0}
+.opt span,.opt b{position:relative;z-index:1}
+.opt.mine{box-shadow:inset 0 0 0 2px var(--amber)}
+.list{display:grid;gap:6px}
+.li{display:flex;justify-content:space-between;gap:10px;background:var(--bg);border-radius:8px;padding:8px 10px;font-size:.92rem}
+.li span{overflow-wrap:anywhere}
+.note{font-size:.8rem;color:var(--muted);margin:0}
+.how{display:grid;gap:8px;font-size:.9rem}
+.how div{display:grid;grid-template-columns:24px 1fr;gap:8px}
+.how b{color:var(--amber)}
+details{font-size:.85rem;color:var(--muted)}
+summary{cursor:pointer;font-weight:700;color:var(--pale)}
+footer{text-align:center;font-size:.8rem;color:var(--muted)}
+footer a{color:var(--blue)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="k" id="kick">Per Capita Nation</span>
+    <h1>A country built by its viewers</h1>
+    <span class="sub" id="sub">Get a passport, vote on the nation, and watch it grow in the daily census Short on @PerCapitaMaps.</span>
+  </header>
+  <div class="stats">
+    <div class="stat"><b id="sPop">–</b><span>Citizens</span></div>
+    <div class="stat"><b id="sHome">–</b><span>Homelands</span></div>
+    <div class="stat"><b id="sRank">–</b><span id="sRankL">Rank</span></div>
+  </div>
+
+  <div id="mine" hidden></div>
+
+  <form class="card" id="join" novalidate>
+    <h2>Get your passport</h2>
+    <label for="nm">Name on your passport (shown publicly)
+      <input id="nm" maxlength="24" placeholder="e.g. Sam or @yourhandle" autocomplete="nickname"></label>
+    <label for="ct">Your home country
+      <select id="ct"><option value="">Loading…</option></select></label>
+    <label class="check" for="ok"><input type="checkbox" id="ok"> I'm fine with this name and country being shown on this page and in the daily video. I can leave any time.</label>
+    <div class="err" id="err" role="alert"></div>
+    <button type="submit" id="go">Become a citizen</button>
+  </form>
+
+  <div class="card" id="voteCard" hidden>
+    <span class="k">Today's vote</span>
+    <h2 id="vq"></h2>
+    <div class="opts" id="vopts"></div>
+    <p class="note" id="vnote">One vote per connection; you can change it until the next census. The result is in the next Short.</p>
+  </div>
+
+  <div class="card">
+    <h2>Find a passport</h2>
+    <label for="q">Name or citizen number
+      <input id="q" placeholder="Try 7 or Sam" autocomplete="off"></label>
+    <div class="list" id="hits"></div>
+  </div>
+
+  <div class="card how">
+    <h2>How it works</h2>
+    <div><b>1</b><span>Join here. You get the next citizen number, for good.</span></div>
+    <div><b>2</b><span>Every day the census counts everyone and averages the real World Bank figures of your home countries. The Short shows where the nation would rank among real countries, and which real country it has to pass next.</span></div>
+    <div><b>3</b><span>Vote here on the nation's flag, capital, motto and more. Each result is in the next day's Short.</span></div>
+    <details id="privacy">
+      <summary>Privacy</summary>
+      <p>We keep only the name you type and the country you pick, with your citizen number and the time you joined. They are shown on this page and may be shown in the daily video on YouTube and Instagram. No email, no login, no tracking cookies. Your browser keeps a private code so it can show your passport and let you leave.</p>
+      <p>To stop one connection making many passports or votes, a salted one-way hash of your internet address is kept for 2 days (sign-ups) or 7 days (votes), then deleted. Nobody can turn it back into the address.</p>
+      <p>Leave any time with the "Leave the nation" button: your passport is deleted at once (videos already published can't be changed). Or ask in a comment on any Per Capita Maps video and we'll delete it.</p>
+      <p>Country figures: World Bank, World Development Indicators (CC BY 4.0).</p>
+    </details>
+  </div>
+  <footer><a href="https://www.youtube.com/@PerCapitaMaps" rel="noopener">youtube.com/@PerCapitaMaps</a></footer>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => Number(n).toLocaleString('en-US');
+const flag = (i2) => i2 ? i2.toUpperCase().replace(/./g, (ch) => String.fromCodePoint(127397 + ch.charCodeAt(0))) : '🏳️';
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+async function api(path, body) {
+  const res = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || 'Something went wrong. Try again.');
+  return json;
+}
+
+let S = null; // the nation right now
+let byIso = {};
+
+function ourFlag() {
+  return S && S.flag ? `<span class="ourflag" aria-label="Our flag"><span style="background:${S.flag[0]}"></span><span style="background:${S.flag[1]}"></span></span>` : '<span class="ourflag q" aria-label="Flag not chosen yet">?</span>';
+}
+
+function paint() {
+  $('sPop').textContent = fmt(S.n);
+  $('sHome').textContent = fmt(S.homelands);
+  if (S.lastCensus && S.lastCensus.rank) {
+    $('sRank').textContent = '#' + S.lastCensus.rank;
+    $('sRankL').textContent = S.lastCensus.metric === 'gdp' ? 'Income rank' : 'Lifespan rank';
+  }
+  if (S.day) $('kick').textContent = `Per Capita Nation · Day ${S.day}`;
+  else if (S.start) $('kick').textContent = `Per Capita Nation · Day 1 on ${new Date(S.start + 'T12:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
+  const sel = $('ct');
+  if (sel.options.length < 3) {
+    sel.innerHTML = '<option value="">Choose…</option>' + S.countries.map((c) => `<option value="${c[0]}">${flag(c[1])} ${esc(c[2])}</option>`).join('');
+  }
+  paintVote();
+}
+
+function paintVote() {
+  const v = S.vote;
+  $('voteCard').hidden = false;
+  $('vq').textContent = v.question;
+  const mine = store.get('nation_vote_' + v.day);
+  const total = v.tally.reduce((a, b) => a + b, 0);
+  $('vopts').innerHTML = v.options.map((o, i) => {
+    const pct = total ? Math.round((v.tally[i] / total) * 100) : 0;
+    return `<button type="button" class="opt${mine === String(i) ? ' mine' : ''}" data-i="${i}">${mine !== null ? `<i class="bar" style="width:${pct}%"></i>` : ''}<span>${esc(o)}</span><b>${mine !== null ? pct + '%' : ''}</b></button>`;
+  }).join('');
+  $('vnote').textContent = mine !== null ? `${fmt(total)} vote${total === 1 ? '' : 's'} so far. You can change yours until the next census; the result is in the next Short.` : 'One vote per connection. The result is in the next Short.';
+}
+
+$('vopts').addEventListener('click', async (e) => {
+  const b = e.target.closest('.opt');
+  if (!b) return;
+  try {
+    S.vote = { ...S.vote, ...(await api('api/vote', { day: S.vote.day, choice: Number(b.dataset.i) })) };
+    store.set('nation_vote_' + S.vote.day, b.dataset.i);
+    paintVote();
+  } catch (err) { $('vnote').textContent = err.message; }
+});
+
+function pct(a, b) {
+  const p = (a / b - 1) * 100;
+  return `<b class="${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '+' : ''}${p.toFixed(0)}%</b>`;
+}
+
+function showPassport(p, own) {
+  const c = byIso[p.iso3] || [p.iso3, '', p.iso3, null, null];
+  const gdp = c[3], le = c[4];
+  $('mine').hidden = false;
+  $('join').hidden = !!own;
+  $('mine').innerHTML = `<div class="pass" aria-live="polite">
+    <div class="top"><span class="k">Passport · Per Capita Nation</span>${ourFlag()}</div>
+    <div class="top"><div class="num">#${p.number}</div><span class="flag">${flag(c[1])}</span></div>
+    <div class="nm">${esc(p.name)}</div>
+    <div class="row"><span>Home</span><b>${esc(c[2])}</b></div>
+    <div class="row"><span>Joined</span><b>${p.joinedDay ? 'Day ' + p.joinedDay : 'Before Day 1 (founder)'}</b></div>
+    <div class="row"><span>Citizens from ${esc(c[2])}</span><b>${fmt(p.sameCountry)}</b></div>
+    ${gdp !== null && S.avg.gdp ? `<div class="row"><span>${esc(c[2])} income per person (${S.years.gdp})</span><b>$${fmt(gdp)}</b></div>
+    <div class="row"><span>vs nation average ($${fmt(Math.round(S.avg.gdp))})</span>${pct(gdp, S.avg.gdp)}</div>` : ''}
+    ${le !== null && S.avg.le ? `<div class="row"><span>Life expectancy (${S.years.le})</span><b>${le} yrs · nation ${S.avg.le.toFixed(1)}</b></div>` : ''}
+    <div class="stamp">${own ? 'APPROVED' : 'CITIZEN'}</div>
+    ${own ? `<button class="sec" type="button" id="share">Copy share text</button>
+    <div class="note" id="shareNote">You'll be counted in the next census Short.</div>
+    <button class="link" type="button" id="leave">Leave the nation</button>` : '<button class="sec" type="button" id="back">Back</button>'}
+  </div>`;
+  if (own) {
+    $('share').onclick = () => {
+      const t = `I'm citizen #${p.number} of Per Capita Nation ${flag(c[1])} Get yours: ${location.origin}`;
+      (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => { $('shareNote').textContent = 'Copied. Paste it anywhere.'; }).catch(() => { $('shareNote').textContent = t; });
+    };
+    $('leave').onclick = async () => {
+      if (!confirm(`Leave Per Capita Nation? Passport #${p.number} is deleted for good.`)) return;
+      await api('api/leave', { code: store.get('nation_code') }).catch(() => null);
+      store.del('nation_code');
+      $('mine').hidden = true; $('join').hidden = false;
+      load();
+    };
+  } else {
+    $('back').onclick = () => { if (store.get('nation_code')) loadMine(); else { $('mine').hidden = true; } };
+  }
+  $('mine').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+$('join').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('nm').value.trim(), iso3 = $('ct').value;
+  if (!name) { $('err').textContent = 'Type the name you want on your passport.'; return; }
+  if (!iso3) { $('err').textContent = 'Choose your home country.'; return; }
+  if (!$('ok').checked) { $('err').textContent = 'Tick the box so we can show your name and country.'; return; }
+  $('err').textContent = ''; $('go').disabled = true;
+  try {
+    const r = await api('api/join', { name, iso3, consent: true });
+    store.set('nation_code', r.code);
+    await load();
+    showPassport(r.passport, true);
+  } catch (err) { $('err').textContent = err.message; }
+  $('go').disabled = false;
+});
+
+let timer;
+$('q').addEventListener('input', () => {
+  clearTimeout(timer);
+  timer = setTimeout(async () => {
+    const v = $('q').value.trim();
+    if (!v) { $('hits').innerHTML = ''; return; }
+    const rows = await api('api/find?q=' + encodeURIComponent(v)).catch(() => []);
+    $('hits').innerHTML = rows.length ? rows.map((c) => `<button type="button" class="li sec" data-no="${c.no}"><span>${flag((byIso[c.iso3] || [])[1])} ${esc(c.name)}</span><b>#${c.number}</b></button>`).join('') : '<p class="note">No citizen found.</p>';
+  }, 250);
+});
+$('hits').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-no]');
+  if (b) showPassport(await api('api/passport/' + b.dataset.no), false);
+});
+
+async function loadMine() {
+  const code = store.get('nation_code');
+  if (!code) return;
+  try { showPassport(await api('api/me?code=' + encodeURIComponent(code)), true); }
+  catch { store.del('nation_code'); }
+}
+
+async function load() {
+  S = await api('api/state');
+  byIso = Object.fromEntries(S.countries.map((c) => [c[0], c]));
+  paint();
+}
+load().then(loadMine).catch(() => { $('sub').textContent = "The nation's records can't be reached right now. Try again in a minute."; });
+</script>
+</body>
+</html>

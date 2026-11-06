@@ -1,7 +1,7 @@
 // Follow-ups to winners: 2 related topics in the same format, queued at top priority. A winning
 // scorecard queues them by itself (once per video), so nobody has to tap or type anything; the
 // follow-ups' previews still come to Telegram for approval like every other video.
-import { getSetting, setSetting } from './db.js';
+import { getSetting, one, setSetting } from './db.js';
 import { say, esc } from './telegram.js';
 import { queue } from './lib/queue.js';
 import { followup } from './discover.js';
@@ -32,6 +32,8 @@ export async function queueFollowup(id: number, quiet = false): Promise<void> {
 // Called for every winning scorecard. Returns 'queued' the first time, 'already' after that.
 export async function autoFollowup(id: number): Promise<'queued' | 'already'> {
   if (await hasFollowups(id)) return 'already';
+  // A Per Capita Nation episode has no dataset topic to follow up; the series is its own follow-up.
+  if ((await one<{ topic_id: number | null }>('SELECT topic_id FROM jobs WHERE id = $1', [id]))?.topic_id == null) return 'already';
   await queueFollowup(id, true);
   return 'queued';
 }

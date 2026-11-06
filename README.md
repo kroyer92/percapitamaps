@@ -100,10 +100,60 @@ Setup on the server, once:
 4. Pull, rebuild and restart: `cd app && git pull && cd .. && docker compose up -d --build`, then
    re-import the workflows (WF5 now also fetches the channel totals for the wall TV).
 
+## Per Capita Nation
+
+`worker/src/nation/`: a country made of viewers. On the passport page (`worker/nation-site`, served
+at `/nation/` and published at `NATION_DOMAIN`) a viewer types a name, picks a home country and gets
+a citizen number. Every day at `NATION_SLOT` minus `NATION_LEAD_HOURS` (16:00 and 2 hours: 14:00 US
+Eastern) the census counts the citizens and averages the World Bank figures of their home countries
+(income per person on odd days, life expectancy on even days), ranks the nation among real
+countries, and finds the smallest real country it hasn't passed yet. The script is written in code
+from those numbers (no language model), voiced, captioned word by word from Whisper's timings, drawn
+as a living island in the channel's map style (`remotion/nation/Nation.tsx`) and checked by QA. The
+preview comes to Telegram and approves itself `NATION_AUTO_APPROVE_MINUTES` (60) before the slot
+unless you press Reject; then WF3 uploads it like any Short (playlist `PLAYLIST_NATION`) and WF4
+posts the Reel as soon as it is live (`NATION_IG_DELAY_HOURS`, default 0). The page also runs a
+daily vote (flag, capital, animal, motto, dish, sport); each result is in the next episode, and the
+flag colours appear on the island and the passports. Episodes are jobs with format `NATION`, so
+scorecards and analytics work as usual; they are left out of the format bandit and auto-tuning.
+
+Citizens come from our own page, not from YouTube comments: the YouTube API policies don't allow
+showing comment data publicly. Only the name and country are stored (privacy.md).
+
+Setup on the server, once (all in one go, as root in `/opt/percapita`):
+
+```
+echo 'NATION_DOMAIN=nation.percapitamaps.duckdns.org' >> .env
+echo 'NATION_START=2026-11-16' >> app/.env
+cat >> Caddyfile <<'CADDY'
+
+{$NATION_DOMAIN} {
+  redir / /nation/
+  handle /nation* {
+    reverse_proxy render-worker:8080
+  }
+  handle {
+    respond 404
+  }
+}
+CADDY
+cd app && git pull && cd .. && docker compose up -d --build
+```
+
+DuckDNS answers for every name under `percapitamaps.duckdns.org`, so the new address needs no DNS
+change, and Caddy gets its certificate by itself. Only `/nation` is passed through. `NATION_START`
+is Day 1; before it, the page already takes citizens (they join as founders) and the first vote.
+YouTube and Instagram don't let a Short's text carry a clickable link, so the page goes in the
+channel's links (YouTube Studio → Customisation → Basic info → Links) and the Instagram bio, once.
+
+Telegram: `/nation` (citizens, vote, times), `/nation test` (a preview from the citizens so far,
+never uploaded), `/nation make` (make today's episode again), `/nation remove <number>` (delete a
+citizen; today's episode is made again without them).
+
 ## Telegram
 
 Buttons on each preview: Approve, Reject, Hook 1–5. Commands: `/status`, `/produce [n]`,
-`/link <job> <url>`, `/followup <job or url>`, `/tune [on|off|reset]`, `/opening`, `/longform [theme]`, `/help`.
+`/link <job> <url>`, `/followup <job or url>`, `/tune [on|off|reset]`, `/opening`, `/longform [theme]`, `/nation`, `/help`.
 
 ## Weekly long-form video
 
