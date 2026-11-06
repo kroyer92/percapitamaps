@@ -33,6 +33,7 @@ n8n (schedules, YouTube credentials)          render-worker (this repo, worker/)
 | What | Command |
 | --- | --- |
 | Start or update everything | `cd app && git pull && cd .. && docker compose up -d --build` |
+| Self-update after each merge (once) | `sudo bash /opt/percapita/app/tools/autodeploy/install.sh`: every 5 min it pulls main, rebuilds when the worker is idle, and says so in Telegram. Off: `sudo systemctl disable --now percapita-autodeploy.timer` |
 | Create tables, load and check datasets | `docker compose run --rm migrate` |
 | Queue the 10 launch concepts | `docker compose exec -T postgres psql -U percapita -d percapita < app/sql/seed_launch_concepts.sql` |
 | One test video | `docker compose exec render-worker npm run test-render -- --concept cattle` |

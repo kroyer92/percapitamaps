@@ -141,6 +141,8 @@ CREATE TABLE IF NOT EXISTS longforms (
   updated_at   timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE longforms ADD COLUMN IF NOT EXISTS upload_tries int NOT NULL DEFAULT 0;  -- times sent to WF3
+ALTER TABLE longforms ADD COLUMN IF NOT EXISTS publish_at timestamptz;              -- the slot it goes public
+ALTER TABLE longforms ADD COLUMN IF NOT EXISTS related_sent boolean NOT NULL DEFAULT false;  -- Related video list sent
 
 -- Per Capita Nation (worker/src/nation): viewers join on the passport page and become numbered
 -- citizens; a daily census Short shows the nation's size and ranks. Only the name a viewer types
