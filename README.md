@@ -115,10 +115,13 @@ the #1 in amber, then extra facts (an anchor country, China and India, who led t
 bottom). Intro, chapters, an "every #1" recap, and a thumbnail (`remotion/Longform.tsx`, `Thumb.tsx`).
 
 It runs by itself on Saturday from 21:00 (LOCAL_TZ) in the same work lane as the Shorts, takes about
-an hour, and arrives in Telegram with the thumbnail, a link to watch it, and Approve/Reject. Approve
-sends the upload steps, title, description with chapters, tags, pinned comment, and which Shorts to
-point their "Related video" at. `/longform [theme]` makes one now; `/link L1 <url>` records the
-upload. `LONGFORM_AUTO=off` in `app/.env` stops the weekly run. Files: `renders/longform-N.mp4`, a
+an hour, and arrives in Telegram with the thumbnail, a link to watch it, and Approve/Reject. With
+`YOUTUBE_API_UPLOADS=on`, Approve hands it to WF3 (job id `L<n>`), which uploads it scheduled for Sunday
+11:00 US Eastern with title, description and chapters, tags, comment and thumbnail (`thumbnails.set`;
+if YouTube refuses the thumbnail, Telegram says how to add it by hand), adds it to `PLAYLIST_LONGFORM`
+if set, and reports back, which links it. Telegram then lists the Shorts whose "Related video" could
+point to it (not in YouTube's API, so optional). With uploads off, Approve sends the steps to upload by
+hand and `/link L1 <url>` records it. `/longform [theme]` makes one now. `LONGFORM_AUTO=off` in `app/.env` stops the weekly run. Files: `renders/longform-N.mp4`, a
 download copy under `public/longform/` (deleted after 14 days; renders after 30).
 
 ## Automatic analysis

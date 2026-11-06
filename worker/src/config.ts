@@ -59,6 +59,7 @@ export const config = {
     SCALE: env.PLAYLIST_SCALE ?? '',
     GUESS: env.PLAYLIST_GUESS ?? '',
   } as Record<Format, string>,
+  playlistLongform: env.PLAYLIST_LONGFORM ?? '',
   // Publishing slots in US Eastern time; the bot also shows them in LOCAL_TZ.
   publishSlots: list(env.PUBLISH_SLOTS || '13:00,19:00'),
   slotTz: env.SLOT_TZ || 'America/New_York',

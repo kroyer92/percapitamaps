@@ -165,6 +165,105 @@
       "retryOnFail": true,
       "maxTries": 3,
       "waitBetweenTries": 5000
+    },
+    {
+      "id": "5b1e7c2a-3f41-4d0b-9a77-0c2f1e8d4a10",
+      "name": "Has thumbnail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "7c0d2b4e-9a1f-4e63-8b25-3d6f0a1c9e21",
+              "leftValue": "={{ $('Approved in Telegram').first().json.body.thumb_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "8e2f4a6c-1b3d-4f58-9c70-2a4e6b8d0f12",
+      "name": "Download thumbnail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        -80
+      ],
+      "parameters": {
+        "url": "={{ $('Approved in Telegram').first().json.body.thumb_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "a3c5e7f9-2b4d-4e6f-8a1c-3e5a7c9e1b23",
+      "name": "Set thumbnail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        -80
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId={{ ($('Upload to YouTube').first().json.uploadId ?? $('Upload to YouTube').first().json.id) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "c4d6e8fa-3c5e-4f70-9b2d-4f6b8dafc234",
+      "name": "Tell the worker: no thumbnail",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=http://render-worker:8080/jobs/{{ $('Approved in Telegram').first().json.body.job_id }}/thumbnail-failed",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ video_id: ($('Upload to YouTube').first().json.uploadId ?? $('Upload to YouTube').first().json.id) }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      }
     }
   ],
   "connections": {
@@ -235,6 +334,59 @@
         [
           {
             "node": "Tell the worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tell the worker": {
+      "main": [
+        [
+          {
+            "node": "Has thumbnail?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has thumbnail?": {
+      "main": [
+        [
+          {
+            "node": "Download thumbnail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Download thumbnail": {
+      "main": [
+        [
+          {
+            "node": "Set thumbnail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Tell the worker: no thumbnail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set thumbnail": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Tell the worker: no thumbnail",
             "type": "main",
             "index": 0
           }
