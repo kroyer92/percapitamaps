@@ -21,7 +21,7 @@ import * as office from '../activity.js';
 import type { Beat } from '../validate.js';
 import type { RankItem } from '../../remotion/types.js';
 import type { LongBeat, LongformProps, LongSegment, ThumbProps } from '../../remotion/longform-types.js';
-import { chooseTheme, planLongform, type Dataset, type LongPlan } from './plan.js';
+import { rankThemes, planLongform, TooFewMapsError, type Dataset, type LongPlan } from './plan.js';
 import { THEMES, themeByKey, type Theme } from './themes.js';
 
 // Pauses (seconds) that give the long video room to breathe: the Shorts run tighter.
@@ -205,22 +205,42 @@ export function longThumb(n: number) { return path.join(config.rendersDir, `long
 
 export async function makeLongform(opts: { theme?: string; maps?: number } = {}): Promise<number | undefined> {
   const views = await viewsByDataset();
-  const recent = (await q<{ theme: string }>(`SELECT theme FROM longforms WHERE status <> 'failed' ORDER BY n DESC LIMIT 4`)).map((r) => r.theme);
-  let theme: Theme;
+  // Only long-forms that were actually made count as "used": a rejected or failed one doesn't use
+  // up its theme.
+  const recent = (await q<{ theme: string }>(`SELECT theme FROM longforms WHERE status IN ('ready', 'approved', 'uploading', 'published') ORDER BY n DESC LIMIT 4`)).map((r) => r.theme);
+  let candidates: Theme[];
   if (opts.theme) {
     const t = themeByKey(opts.theme);
     if (!t) { await say(`No theme called "${esc(opts.theme)}". Themes: ${THEMES.map((x) => x.key).join(', ')}`); return undefined; }
-    theme = t;
-  } else theme = chooseTheme(views, recent);
+    candidates = [t];
+  } else candidates = rankThemes(views, recent);
+  let theme = candidates[0];
   const row = await one<{ n: number }>(`INSERT INTO longforms (theme) VALUES ($1) RETURNING n`, [theme.key]);
   const n = row!.n;
   const dir = longDir(n);
   const step = (s: string) => { console.log(`[longform ${n}] ${s}`); office.working('editor', `Long-form #${n}: ${s}`); };
-  await say(`🎞 Making long-form #${n}: <b>${esc(theme.name)}</b>${opts.theme ? '' : ' (the theme whose maps got your Shorts the most views)'}. About an hour; it arrives here when it's done.`);
+  await say(`🎞 Making long-form #${n}. About an hour; it arrives here when it's done.`);
   try {
     await fs.mkdir(dir, { recursive: true });
-    step('picking the maps');
-    const plan = await planLongform({ theme, viewsByDataset: views, lookup, maps: opts.maps, onStep: step });
+    // A theme with too few good maps is skipped for the next best one, so the weekly video still
+    // gets made. A theme Niko asked for by name is not swapped.
+    let plan: LongPlan | undefined;
+    const tooFew: string[] = [];
+    for (const t of candidates) {
+      step(`picking the maps for ${t.name}`);
+      try {
+        plan = await planLongform({ theme: t, viewsByDataset: views, lookup, maps: opts.maps, onStep: step });
+        theme = t;
+        break;
+      } catch (e) {
+        if (!(e instanceof TooFewMapsError) || candidates.length === 1) throw e;
+        tooFew.push(t.name);
+        step(String((e as Error).message).slice(0, 200));
+      }
+    }
+    if (!plan) throw new Error(`No theme has enough usable maps (tried ${tooFew.join(', ')}).`);
+    await q(`UPDATE longforms SET theme = $2, updated_at = now() WHERE n = $1`, [n, theme.key]);
+    await say(`🎞 Long-form #${n} theme: <b>${esc(theme.name)}</b>${opts.theme ? '' : ' (the theme whose maps got your Shorts the most views)'}${tooFew.length ? `. Skipped ${esc(tooFew.join(', '))}: too few maps with good data` : ''}.`);
     await q(`UPDATE longforms SET datasets = $2, updated_at = now() WHERE n = $1`, [n, plan.segments.map((s) => s.dataset_id)]);
 
     // Voice: one call per map, so no single call runs into the voice engine's time limit.

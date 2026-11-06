@@ -188,14 +188,21 @@ function sourceNames(segs: PlannedSegment[]): string {
   return namesList(names.slice(0, 3));
 }
 
-// Picks the theme: the one whose datasets earned the Shorts the most views, skipping themes used
-// in the last few long-form videos. Without view data it goes down the list in order.
-export function chooseTheme(viewsByDataset: Map<string, number>, recentThemes: string[]): Theme {
-  const fresh = THEMES.filter((t) => !recentThemes.includes(t.key));
-  const pool = fresh.length ? fresh : THEMES;
+// Ranks the themes: the ones whose datasets earned the Shorts the most views first, with themes used
+// in the last few long-form videos moved to the back (still there, so a fallback always exists).
+// Without view data it goes down the list in order.
+export function rankThemes(viewsByDataset: Map<string, number>, recentThemes: string[]): Theme[] {
   const score = (t: Theme) => t.datasets.reduce((s, id) => s + (viewsByDataset.get(id) ?? 0), 0);
-  return [...pool].sort((a, b) => score(b) - score(a) || THEMES.indexOf(a) - THEMES.indexOf(b))[0];
+  const ranked = [...THEMES].sort((a, b) => score(b) - score(a) || THEMES.indexOf(a) - THEMES.indexOf(b));
+  return [...ranked.filter((t) => !recentThemes.includes(t.key)), ...ranked.filter((t) => recentThemes.includes(t.key))];
 }
+
+export function chooseTheme(viewsByDataset: Map<string, number>, recentThemes: string[]): Theme {
+  return rankThemes(viewsByDataset, recentThemes)[0];
+}
+
+// Thrown when a theme has too few maps with good data; the caller can try the next theme.
+export class TooFewMapsError extends Error {}
 
 // Order: datasets whose Short did best first (the first map holds the most viewers), then the
 // theme's own order. At most two maps per group, so ten maps are not ten kinds of GDP.
@@ -234,7 +241,7 @@ export async function planLongform(opts: {
       skipped.push(`${id}: ${String(e.message ?? e).slice(0, 120)}`);
     }
   }
-  if (picked.length < MIN_MAPS) throw new Error(`Only ${picked.length} usable maps for "${opts.theme.name}" (need ${MIN_MAPS}). ${skipped.join('; ')}`);
+  if (picked.length < MIN_MAPS) throw new TooFewMapsError(`Only ${picked.length} usable maps for "${opts.theme.name}" (need ${MIN_MAPS}). ${skipped.join('; ')}`);
 
   const total = picked.length;
   const segments: PlannedSegment[] = picked.map((p, i) => {
