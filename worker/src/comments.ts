@@ -121,9 +121,9 @@ async function jobFor(c: ViewerComment): Promise<JobLite | undefined> {
   return one<JobLite>(`SELECT id, facts, packaging, format FROM jobs WHERE ${col} = $1`, [c.video_id]);
 }
 
-async function askModel(c: ViewerComment, title: string, facts: Facts | undefined, u: any): Promise<ModelView | undefined> {
+async function askModel(c: ViewerComment, title: string, facts: Facts | undefined, u: any, hide: boolean): Promise<ModelView | undefined> {
   try {
-    return await chatLocalJson<ModelView>({ temperature: 0.2, numPredict: 200, ...modelPrompt(c.text, title, facts, u) });
+    return await chatLocalJson<ModelView>({ temperature: 0.2, numPredict: 200, ...modelPrompt(c.text, title, facts, u, hide) });
   } catch (e: any) {
     console.warn('[comments] local model unavailable, sorting by rules:', e.message);
     return undefined;
@@ -165,9 +165,10 @@ async function handle(list: ViewerComment[]): Promise<{ sent: number; waiting: n
     const job = await jobFor(c);
     const facts = job?.facts ?? undefined;
     const u = facts ? CATALOG.find((d) => d.id === facts.dataset_id) : undefined;
-    const model = await askModel(c, job?.packaging?.title ?? '', u ? facts : undefined, u);
+    const hide = job?.format !== 'SCALE'; // every quiz format: the top of the ranking is the answer
+    const model = await askModel(c, job?.packaging?.title ?? '', u ? facts : undefined, u, hide);
     usedModel ||= !!model;
-    const d = draftFor(c.text, u ? facts : undefined, u, model);
+    const d = draftFor(c.text, u ? facts : undefined, u, model, hide);
     await say(telegramText(c, job, d));
     await q(
       `INSERT INTO comments (platform, id, video_id, job_id, author, text, published_at, kind, action, reply)

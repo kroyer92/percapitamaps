@@ -12,6 +12,6 @@ if (!ds || !texts.length) {
 }
 const facts = await loadFacts(ds, 'MAP_REVEAL');
 for (const t of texts) {
-  const d = draftFor(t, facts, ds);
+  const d = draftFor(t, facts, ds, undefined, true);
   console.log(`\n> ${t}\n  [${d.kind}] ${d.action}${d.reply ? `\n  ${d.reply}` : ''}`);
 }
