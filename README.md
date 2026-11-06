@@ -232,6 +232,14 @@ cross-posted Reels come the same way when the token may read them.
   then the US (or the world median) to compare, no final full stop. A country missing from the
   data gets "isn't in this 2024 data", never a guess. Try it on the server:
   `docker compose exec render-worker npm run comments-try -- wb_100_dollars "What about Vietnam?"`
+- **Never the answer.** Every format except SCALE is a quiz, so a reply never names the top 3
+  countries or their rank or value (a commenter who names one gets "Iceland makes the top 3").
+  The model never sees them, and a model reply that names them or talks about "highest" is
+  thrown away.
+- **Slang and confusion.** Short forms are written out before anything reads the comment (fym,
+  wdym = "what do you mean", idk, ngl, tbh…), so they are never taken for a name. "What do you
+  mean by index points", "what is HDI" or "I'm so confused" get a plain explanation of what the
+  number measures (fixed text per dataset in `MEANING`, or built from its title and unit).
 - **Critical or political comments** get "Fair point." and one neutral line on what the map
   counts, no rebuttal. Praise: "Heart it. No reply needed." Spam: remove it.
 - **The model only sorts.** The VPS model (Ollama) labels each comment and may word a reply to a
