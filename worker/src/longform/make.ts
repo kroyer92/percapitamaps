@@ -193,9 +193,9 @@ export async function relatedShorts(datasets: string[]): Promise<RelatedShort[]>
      WHERE j.youtube_url IS NOT NULL AND t.dataset_id = ANY($1) ORDER BY j.id`, [datasets]);
 }
 
-function publishSlot(): Date {
+function publishSlot(after = new Date()): Date {
   // Sunday 11:00 US Eastern (17:00 in Copenhagen): the next one at least 3 hours away.
-  const from = new Date(Date.now() + 3 * 3600_000);
+  const from = new Date(after.getTime() + 3 * 3600_000);
   return upcomingSlots(['11:00'], config.slotTz, from, 8).find((d) => new Intl.DateTimeFormat('en-US', { timeZone: config.slotTz, weekday: 'short' }).format(d) === 'Sun') ?? from;
 }
 
@@ -326,10 +326,10 @@ export async function approveLongform(n: number, opts: { manual?: boolean } = {}
   const lf = await one<any>('SELECT * FROM longforms WHERE n = $1', [n]);
   if (!lf) return;
   if (lf.status !== 'ready') { await say(`Long-form #${n} is already ${lf.status}.`); return; }
-  await q(`UPDATE longforms SET status = 'approved', updated_at = now() WHERE n = $1`, [n]);
+  const slot = publishSlot();
+  await q(`UPDATE longforms SET status = 'approved', publish_at = $2, updated_at = now() WHERE n = $1`, [n, slot]);
   const p = lf.packaging;
   const link = (f: string) => `https://${config.mediaDomain}/longform/${f}`;
-  const slot = publishSlot();
   const when = `<b>${fmtIn(slot, config.localTz)} your time</b> (${fmtIn(slot, config.slotTz)} US Eastern)`;
   if (config.youtubeApiUploads && !opts.manual) {
     try {
@@ -383,7 +383,7 @@ async function sendToYoutube(lf: any, slot: Date): Promise<void> {
     }),
   });
   if (!res.ok) throw new Error(`n8n WF3 webhook answered ${res.status}. Is WF3 active?`);
-  await q(`UPDATE longforms SET status = 'uploading', upload_tries = upload_tries + 1, updated_at = now() WHERE n = $1`, [n]);
+  await q(`UPDATE longforms SET status = 'uploading', upload_tries = upload_tries + 1, publish_at = $2, updated_at = now() WHERE n = $1`, [n, slot]);
   office.working('publisher', `Uploading long-form #${n}`);
 }
 
@@ -422,16 +422,45 @@ export async function rejectLongform(n: number): Promise<void> {
 export async function linkLongform(n: number, url: string, uploaded = false): Promise<string> {
   const lf = await one<any>('SELECT * FROM longforms WHERE n = $1', [n]);
   if (!lf) return `There is no long-form #${n}.`;
-  await q(`UPDATE longforms SET status = 'published', youtube_url = $2, updated_at = now() WHERE n = $1`, [n, url]);
+  const goesPublic: Date = lf.publish_at ? new Date(lf.publish_at) : publishSlot(new Date(lf.updated_at));
+  await q(`UPDATE longforms SET status = 'published', youtube_url = $2, publish_at = $3, updated_at = now() WHERE n = $1`, [n, url, goesPublic]);
   office.finished('publisher', `Long-form #${n} is on YouTube`);
   const related: RelatedShort[] = lf.related ?? [];
-  return [
+  // A scheduled video can't be picked as a Short's Related video until it is public, so that list
+  // comes when it goes public (sendRelatedWhenPublic).
+  const later = related.length && goesPublic > new Date();
+  const lines = [
     uploaded ? `📺 Long-form #${n} is uploaded and scheduled: ${esc(url)}` : `🔗 Linked long-form #${n} to ${esc(url)}.`,
+    `It goes public ${fmtIn(goesPublic, config.localTz)} your time${later ? '. Then I send you the Shorts to point at it as Related video' : ''}.`,
     'Next week\'s long-form is made on Saturday evening.',
-    // YouTube's API has no setting for a Short's "Related video" or for end screens, so these stay
-    // optional hand steps that help the long-form get views.
-    ...(related.length ? ['', `<b>Optional, 2 min, helps it get views:</b> on each of these Shorts, Studio → Details → Related video → pick this long-form:`, ...related.map((r) => `• ${esc(r.title ?? `#${r.job_id}`)} ${esc(r.url)}`)] : []),
-  ].join('\n');
+  ];
+  if (related.length && !later) {
+    lines.push('', ...relatedLines(related));
+    await q(`UPDATE longforms SET related_sent = true WHERE n = $1`, [n]);
+  }
+  return lines.join('\n');
+}
+
+// YouTube's API has no setting for a Short's "Related video" or for end screens, so these stay
+// optional hand steps that help the long-form get views.
+function relatedLines(related: RelatedShort[]): string[] {
+  return [`<b>Optional, 2 min, helps it get views:</b> on each of these Shorts, Studio → Details → Related video → pick this long-form:`,
+    ...related.map((r) => `• ${esc(r.title ?? `#${r.job_id}`)} ${esc(r.url)}`)];
+}
+
+// Runs every 10 minutes: once a long-form is public, the Related video list is sent.
+export async function sendRelatedWhenPublic(): Promise<void> {
+  const rows = await q<any>(`SELECT * FROM longforms WHERE status = 'published' AND NOT related_sent
+    AND COALESCE(publish_at, updated_at) > now() - interval '7 days'`);
+  for (const lf of rows) {
+    // A long-form linked before publish_at was stored goes public in the Sunday slot after its link.
+    const goesPublic = lf.publish_at ? new Date(lf.publish_at) : publishSlot(new Date(lf.updated_at));
+    if (goesPublic > new Date()) continue;
+    await q(`UPDATE longforms SET related_sent = true WHERE n = $1`, [lf.n]);
+    const related: RelatedShort[] = lf.related ?? [];
+    if (!related.length) continue;
+    await say([`🔗 Long-form #${lf.n} is public now: ${esc(lf.youtube_url ?? '')}`, '', ...relatedLines(related)].join('\n'));
+  }
 }
 
 // The weekly run: Saturday from 21:00 in LOCAL_TZ, once a week, unless LONGFORM_AUTO=off.
