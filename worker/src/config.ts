@@ -81,7 +81,30 @@ export const config = {
   // Weekly analytics JSON for Claude's review; keep off until the YouTube API audit is approved.
   analysisExport: (env.ANALYSIS_EXPORT ?? 'off').toLowerCase() === 'on',
   analysisExportToken: env.ANALYSIS_EXPORT_TOKEN ?? '',
+  // Per Capita Nation (src/nation): a daily census Short of the viewers who joined on the passport
+  // page. NATION_START is Day 1 (YYYY-MM-DD in SLOT_TZ); empty means no episodes yet, while the
+  // page already takes citizens. The census runs NATION_LEAD_HOURS before NATION_SLOT (US Eastern).
+  nation: {
+    start: env.NATION_START ?? '',
+    slot: env.NATION_SLOT || '16:00',
+    leadHours: Number(env.NATION_LEAD_HOURS ?? 2),
+    // The preview approves itself this many minutes before the slot unless you reject it (0 = wait for you).
+    autoApproveMinutes: Number(env.NATION_AUTO_APPROVE_MINUTES ?? 60),
+    domain: env.NATION_DOMAIN ?? '',
+    playlist: env.PLAYLIST_NATION ?? '',
+    igDelayHours: Number(env.NATION_IG_DELAY_HOURS ?? 0),
+    joinsPerDay: Number(env.NATION_JOINS_PER_DAY ?? 3), // per address, against spam
+    // Votes wait for villagers: they open at NATION_VOTE_FROM citizens, and a question is only
+    // decided once it has NATION_VOTE_MIN votes; until then it stays open from day to day.
+    voteFrom: Number(env.NATION_VOTE_FROM ?? 50),
+    voteMin: Number(env.NATION_VOTE_MIN ?? 20),
+  },
 };
+
+// Per Capita Nation episodes are jobs rows too (topic_id NULL), so uploads, Instagram, analytics
+// and scorecards work as for every Short. They are not one of the rotating FORMATS.
+export const NATION = 'NATION';
+export const isNation = (format: string | null | undefined) => format === NATION;
 
 export const FORMAT_NAMES: Record<Format, string> = {
   MAP_REVEAL: 'Map Reveal',

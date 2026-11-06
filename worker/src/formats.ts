@@ -28,7 +28,7 @@ function betaSample(a: number, b: number): number {
 
 export async function recentFormats(n = 2): Promise<string[]> {
   const rows = await q<{ format: string }>(
-    `SELECT format FROM jobs WHERE status NOT IN ('rejected','render_failed','needs_human','dead_letter','producing')
+    `SELECT format FROM jobs WHERE status NOT IN ('rejected','render_failed','needs_human','dead_letter','producing') AND format <> 'NATION'
      ORDER BY created_at DESC LIMIT $1`, [n]);
   return rows.map((r) => r.format);
 }
@@ -41,7 +41,7 @@ export async function blockedFormat(): Promise<string | undefined> {
 // Wins = videos in the top 20% of 72-hour views; everything else measured is a loss.
 async function banditScores(): Promise<Map<string, { wins: number; losses: number }> | undefined> {
   const rows = await q<{ format: string; views: number }>(
-    `SELECT j.format, m.views FROM metrics m JOIN jobs j ON j.id = m.job_id WHERE m.win = '72h' AND m.views IS NOT NULL`);
+    `SELECT j.format, m.views FROM metrics m JOIN jobs j ON j.id = m.job_id WHERE m.win = '72h' AND m.views IS NOT NULL AND j.format <> 'NATION'`);
   if (rows.length < 10) return undefined;
   const sorted = rows.map((r) => r.views).sort((a, b) => a - b);
   const cut = sorted[Math.floor(sorted.length * 0.8)];

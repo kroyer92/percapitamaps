@@ -16,7 +16,7 @@ import type { Opening, ShortProps } from '../remotion/types.js';
 
 let bundlePromise: Promise<string> | undefined;
 
-async function serveUrl(): Promise<string> {
+export async function serveUrl(): Promise<string> {
   try {
     await fs.access(path.join(config.bundleDir, 'index.html'));
     return config.bundleDir;

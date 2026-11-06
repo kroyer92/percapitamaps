@@ -5,6 +5,20 @@ import { lastJsonLine, run } from './lib/proc.js';
 
 const ORDINALS = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth', 'eighteenth', 'nineteenth', 'twentieth'];
 
+const ONES = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+const TENS_TH = ['', '', 'twentieth', 'thirtieth', 'fortieth', 'fiftieth', 'sixtieth', 'seventieth', 'eightieth', 'ninetieth'];
+
+// "31st" -> "thirty-first", "142nd" -> "one hundred forty-second" (Per Capita Nation's ranks).
+export function ordinalWords(n: number): string | undefined {
+  if (!Number.isInteger(n) || n < 1 || n > 999) return undefined;
+  const hundreds = Math.floor(n / 100), rest = n % 100;
+  const head = hundreds ? `${ONES[hundreds]} hundred` : '';
+  if (!rest) return `${head}th`;
+  const tail = rest <= 20 ? ORDINALS[rest] : rest % 10 === 0 ? TENS_TH[rest / 10] : `${TENS[Math.floor(rest / 10)]}-${ORDINALS[rest % 10]}`;
+  return head ? `${head} ${tail}` : tail;
+}
+
 // Spell out what the voice engine would otherwise misread.
 export function speakable(text: string): string {
   return text
@@ -33,7 +47,7 @@ export function speakable(text: string): string {
     .replace(/(\d)\.(\d+)/g, (_m, a, b) => `${a} point ${b.split('').join(' ')}`)
     .replace(/#(\d+)/g, 'number $1')
     // "6th" (the rank strip hook, "America? Only 6th richest.") -> "sixth".
-    .replace(/\b(\d{1,2})(?:st|nd|rd|th)\b/gi, (m, n) => ORDINALS[Number(n)] || m)
+    .replace(/\b(\d{1,3})(?:st|nd|rd|th)\b/gi, (m, n) => ordinalWords(Number(n)) || m)
     .replace(/\bvs\.?\b/gi, 'versus')
     .replace(/\s+/g, ' ')
     .trim();
