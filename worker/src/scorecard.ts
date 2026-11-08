@@ -51,6 +51,7 @@ export interface Score {
   drop?: Drop;
   why: string[];
   peers: number;
+  provisional?: boolean; // fetched before YouTube Analytics caught up: not shown or compared yet
 }
 
 // Creator-reported ranges for YouTube (1of10, Sep 2026) and estimates for the rest.

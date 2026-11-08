@@ -32,6 +32,13 @@ const ANALYTICS_LAG_DAYS = 3; // YouTube Analytics runs 2–3 days behind, so a 
 // out). The report always ends on the window's own last day, so a late or backfilled "24h" still
 // measures day one, not everything up to today.
 const RETRY_HOURS = 96;
+// A snapshot fetched before Analytics has caught up mixes live view counts with engaged views from
+// only the first day or two (one video showed 1,045 views against 12 engaged, "1% stayed"). So a
+// snapshot counts as settled only once it was fetched ANALYTICS_LAG_DAYS after its window ended;
+// until then it is fetched again, scored silently and kept out of every comparison.
+const settleAt = (pub: Date | string | number, hours: number) => +new Date(pub) + hours * 3600_000 + ANALYTICS_LAG_DAYS * 86_400_000;
+// SQL: a metrics row (alias m) that is still provisional.
+export const PROVISIONAL_SQL = `COALESCE(m.score->>'provisional', '') = 'true'`;
 
 export async function dueSnapshots() {
   await nagUnlinked().catch((e) => console.error('[nag]', e.message));
@@ -47,7 +54,9 @@ export async function dueSnapshots() {
       if (at > Date.now()) break;
       const m = have.get(`${j.id}:${w.win}`);
       // 12 h past RETRY_HOURS leaves room for the final run that sends the scorecard anyway.
-      const retry = m && !m.ready && Date.now() < at + (RETRY_HOURS + 12) * 3600_000 && Date.now() - +new Date(m.captured_at) > 5 * 3600_000;
+      const waiting = m && !m.ready && Date.now() < at + (RETRY_HOURS + 12) * 3600_000;
+      const unsettled = m && +new Date(m.captured_at) < settleAt(pub, w.hours);
+      const retry = (waiting || unsettled) && Date.now() - +new Date(m.captured_at) > 5 * 3600_000;
       if (!m || retry) {
         out.push({ job_id: j.id, video_id: j.youtube_video_id, win: w.win, start_date: ymd(new Date(pub)), end_date: ymd(new Date(Math.min(at, Date.now()))) });
         break; // one window per video per run; the next run catches up
@@ -109,6 +118,9 @@ export async function storeSnapshot(body: any): Promise<void> {
   office.working('analyst', `Reading the ${body.win} numbers for #${jobId}`, jobId);
   const ig = await igInsights(jobId);
   const curve = curveRows(body.curve);
+  // Was this window already told in Telegram? Then a later, settled fetch only corrects it quietly.
+  const prev = (await q<{ engaged_views: number | null; score: Score | null }>('SELECT engaged_views, score FROM metrics WHERE job_id = $1 AND win = $2', [jobId, body.win]))[0];
+  const told = !!prev && prev.engaged_views !== null && !prev.score?.provisional;
   await q(
     `INSERT INTO metrics (job_id, win, views, engaged_views, avg_view_pct, avg_view_sec, likes, shares, comments, subs_gained, raw, curve, ig)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
@@ -130,7 +142,7 @@ export async function storeSnapshot(body: any): Promise<void> {
       ig,
     ],
   );
-  await scoreAndTell(jobId, body.win, pub ? +new Date(pub) + (hours + RETRY_HOURS) * 3600_000 : 0, late);
+  await scoreAndTell(jobId, body.win, pub ? +new Date(pub) + (hours + RETRY_HOURS) * 3600_000 : 0, late, pub ? settleAt(pub, hours) : 0, told);
 }
 
 // YouTube Analytics' audience retention report: rows of [elapsedVideoTimeRatio, audienceWatchRatio].
@@ -180,19 +192,29 @@ type JobInfo = { id: number; title: string | null; hook_type: string | null; ope
 // Scores a fresh snapshot against the bands and the channel's other videos, saves the verdict and
 // tells you in Telegram what it means and what (if anything) has to happen. Winners get their
 // follow-ups queued automatically.
-async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = false): Promise<void> {
+async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = false, settledAt = 0, told = false): Promise<void> {
   const job = (await q<JobInfo & { format: string; published_at: Date | null; created_at: Date }>(`SELECT id, packaging->>'title' AS title, hook_type, opening, format, published_at, created_at, script, render, youtube_video_id FROM jobs WHERE id = $1`, [jobId]))[0];
   const snap = (await q<Snapshot>('SELECT * FROM metrics WHERE job_id = $1 AND win = $2', [jobId, win]))[0];
   if (!job || !snap) return;
   const peers = await q<Snapshot>(
     `SELECT m.* FROM metrics m JOIN jobs j ON j.id = m.job_id
-     WHERE m.win = $1 AND m.job_id <> $2 AND j.published_at > now() - interval '90 days'`, [win, jobId]);
+     WHERE m.win = $1 AND m.job_id <> $2 AND j.published_at > now() - interval '90 days' AND NOT ${PROVISIONAL_SQL}`, [win, jobId]);
   const video: VideoInfo = { hook_type: job.hook_type, beats: job.script?.beats ?? [], clips: job.render?.clips ?? [], seconds: job.render?.seconds ?? 0 };
   const sc = score(snap, video, peers);
+  const provisional = Date.now() < settledAt;
+  if (provisional) sc.provisional = true;
   await q('UPDATE metrics SET score = $3 WHERE job_id = $1 AND win = $2', [jobId, win, sc]);
   if (snap.engaged_views === null && Date.now() < retryUntil) {
     // YouTube Analytics hasn't caught up yet; the next WF5 run fetches this window again.
     office.finished('analyst', `#${jobId} at ${win}: waiting for YouTube Analytics to catch up`, jobId);
+    return;
+  }
+  if (provisional) {
+    office.finished('analyst', `#${jobId} at ${win}: early numbers saved; the scorecard follows once YouTube Analytics has caught up`, jobId);
+    return;
+  }
+  if (told) {
+    office.finished('analyst', `#${jobId} at ${win}: corrected with complete Analytics numbers (${VERDICT[sc.verdict]})`, jobId);
     return;
   }
   office.finished('analyst', `#${jobId} at ${win}: ${VERDICT[sc.verdict]}, ${sc.reason}`, jobId);
@@ -326,7 +348,7 @@ export function readOpening(rows: OpeningRow[], decided: OpeningChoice | null, n
 
 export async function openingTest(): Promise<OpeningTest> {
   const rows = await q<OpeningRow>(
-    `SELECT j.opening, COALESCE(j.published_at, j.slot_at) AS at, m.views, m.engaged_views AS engaged
+    `SELECT j.opening, COALESCE(j.published_at, j.slot_at) AS at, m.views, CASE WHEN ${PROVISIONAL_SQL} THEN NULL ELSE m.engaged_views END AS engaged
      FROM jobs j LEFT JOIN metrics m ON m.job_id = j.id AND m.win = '72h'
      WHERE j.format = 'MAP_REVEAL' AND j.opening IS NOT NULL AND j.status IN ('approved', 'published')`);
   return readOpening(rows, await chosenOpening());
@@ -389,7 +411,7 @@ async function weeklyReportInner(): Promise<string> {
   const verdicts = await q<{ verdict: string; n: number }>(
     `SELECT score->>'verdict' AS verdict, count(*)::int AS n FROM (
        SELECT DISTINCT ON (m.job_id) m.score FROM metrics m JOIN jobs j ON j.id = m.job_id
-       WHERE j.published_at > now() - interval '28 days' AND m.score IS NOT NULL
+       WHERE j.published_at > now() - interval '28 days' AND m.score IS NOT NULL AND NOT ${PROVISIONAL_SQL}
        ORDER BY m.job_id, CASE m.win WHEN '7d' THEN 1 WHEN '72h' THEN 2 ELSE 3 END) s
      GROUP BY 1 ORDER BY 2 DESC`);
   const verdictLine = verdicts.map((v) => `${v.verdict} ${v.n}`).join(' · ') || 'none scored yet';
@@ -405,7 +427,7 @@ async function weeklyReportInner(): Promise<string> {
   const history = await q<{ id: number; format: string; made: Date; win: string; score: Score | null; views: number | null; engaged: number | null; apv: number | null }>(
     `SELECT DISTINCT ON (j.id) j.id, j.format, j.created_at AS made, m.win, m.score, m.views, m.engaged_views AS engaged, m.avg_view_pct AS apv
      FROM jobs j JOIN metrics m ON m.job_id = j.id
-     WHERE j.published_at > now() - interval '90 days' AND m.win IN ('72h','7d')
+     WHERE j.published_at > now() - interval '90 days' AND m.win IN ('72h','7d') AND NOT ${PROVISIONAL_SQL}
      ORDER BY j.id, CASE m.win WHEN '7d' THEN 1 ELSE 2 END`);
   const call = channelCall(history.filter((r) => r.score).map((r) => ({ grades: r.score!.grades ?? {}, current: isCurrent(r.format, r.made) })), opening);
   const byVersion = new Map<string, { stay: number[]; apv: number[]; n: number }>();
