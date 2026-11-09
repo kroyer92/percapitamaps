@@ -7,6 +7,7 @@ import * as P from './prompts.js';
 import { HIGH_END } from './data/catalog.js';
 import { planFor, writePlanned, type Slot } from './plan.js';
 import { spokenName, type Opening } from './opening.js';
+import { findCountries } from './comment-draft.js';
 import { allowedNumbers, checkScript, isMinor, type Filler, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
 
 export interface Hook { type: string; text: string }
@@ -114,6 +115,18 @@ export function hideAnswer(pk: Packaging, facts: Facts, format: Format, question
   return fixed;
 }
 
+// A Guess video shows three options and the viewer picks one. A hook that names any of them gives
+// the game away: job #61 opened "The top workforce is 4.4 times America's total" with the US as
+// option C, and its other hooks said "does not belong to India" and "Is the US the largest?". So no
+// hook may name an option, not even as a comparison ("America's", "Americans", "the US" all count).
+// Returns the options the text names; empty means the hook is safe.
+export function namedOptions(text: string, facts: Pick<Facts, 'guess'>, format: Format): string[] {
+  const opts = format === 'GUESS' ? facts.guess?.options ?? [] : [];
+  if (!opts.length || !text) return [];
+  const found = findCountries(text);
+  return opts.filter((o) => found.includes(o.iso3)).map((o) => o.name);
+}
+
 export function buildDescription(p: Packaging, facts: Facts, musicCredit?: string): string {
   return [
     p.summary,
@@ -186,12 +199,17 @@ export async function generateContent(opts: {
     } else {
       script = await writeScript(question, format, system, allowed, words, spoiler, fillers, opts.twist, fixHint, onStep);
     }
-    const originalHook = script.beats[0].vo;
+    let originalHook = script.beats[0].vo;
 
     onStep('Writing alternative hooks');
     // Hooks: keep only the ones that pass the same number and length checks.
-    const h = await chatJson<{ hooks: Hook[]; test_first: number }>({ temperature: 0.6, system, user: P.hooksUser(question, originalHook) });
-    const hooks = (h.hooks ?? []).filter((x) => x?.text && wordCount(x.text) <= 10 && !isBanned(x.text) && !spoils(x.text, spoiler) && numbersIn(x.text).every((n) => allowed.has(n))).slice(0, 5);
+    // Guess: the script's own hook may not name an option either; the question is the safe line.
+    if (namedOptions(originalHook, facts, format).length) originalHook = script.beats[0].vo = question;
+    const optionNames = format === 'GUESS' ? facts.guess?.options.map((o) => o.name) : undefined;
+    const h = await chatJson<{ hooks: Hook[]; test_first: number }>({ temperature: 0.6, system, user: P.hooksUser(question, script.beats[0].vo, optionNames) });
+    const hooks = (h.hooks ?? []).filter((x) => x?.text && wordCount(x.text) <= 10 && !isBanned(x.text) && !spoils(x.text, spoiler) && !namedOptions(x.text, facts, format).length && numbersIn(x.text).every((n) => allowed.has(n))).slice(0, 5);
+    const dropped = (h.hooks ?? []).filter((x) => x?.text && namedOptions(x.text, facts, format).length);
+    if (dropped.length) onStep(`Dropped ${dropped.length} hook(s) that named an answer option`);
     let chosen = -1;
     // The rank strip keeps its own line (the alternatives stay as buttons on the preview), and
     // shows the words the voice says instead of the question: one text on screen, not two.

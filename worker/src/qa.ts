@@ -3,6 +3,7 @@
 import { run } from './lib/proc.js';
 import { transcribe, wordDiff, type Word } from './voice.js';
 import { licenseVerdict } from './data/fetch.js';
+import { findCountries } from './comment-draft.js';
 import type { TimedBeat } from '../remotion/types.js';
 
 export type Status = 'pass' | 'warn' | 'fail';
@@ -46,6 +47,7 @@ export async function runQa(opts: {
   criticVerdict?: string;
   skipWhisper?: boolean;
   heard?: Word[]; // already transcribed by the render (caption timing)
+  guessOptions?: { iso3: string; name: string }[]; // Guess only: the hook may not name any of them
 }): Promise<QaReport> {
   const checks: Check[] = [];
   const add = (name: string, status: Status, detail: string) => checks.push({ name, status, detail });
@@ -68,6 +70,15 @@ export async function runQa(opts: {
   );
   const longest = Math.max(0, ...sil.map((s) => s.end - s.start));
   add('No dead air', longest <= 0.6 ? 'pass' : longest <= 1.2 ? 'warn' : 'fail', longest ? `longest pause ${longest.toFixed(2)} s` : 'no pauses over 0.6 s');
+
+  // Guess: the hook (spoken or on screen) must not name an answer option; "4.4 times America's" with
+  // the US as option C tells the viewer it isn't the US (job #61). This catches it after a Hook
+  // button swap too, since that re-renders and comes back through here.
+  if (opts.guessOptions?.length && opts.beats[0]) {
+    const found = findCountries(`${opts.beats[0].vo} . ${opts.beats[0].on_screen ?? ''}`);
+    const named = opts.guessOptions.filter((o) => found.includes(o.iso3)).map((o) => o.name);
+    add('Hook keeps the options hidden', named.length ? 'fail' : 'pass', named.length ? `the hook names ${named.join(', ')}` : 'no option named in the hook');
+  }
 
   const longBeats = opts.beats.map((b, i) => ({ i, s: (b.end - b.start) / opts.fps })).filter((b) => b.s > 3.0 && !opts.beats[b.i].visual.startsWith('pause'));
   add('Visual change every 3 s', longBeats.length ? 'warn' : 'pass', longBeats.length ? longBeats.map((b) => `beat ${b.i + 1}: ${b.s.toFixed(1)} s`).join(', ') : 'all beats 3 s or shorter');
