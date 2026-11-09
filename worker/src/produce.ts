@@ -215,6 +215,7 @@ export async function renderAndPreview(id: number, reuseClips = false): Promise<
     numbersOk: true,
     criticVerdict: job.critic?.verdict,
     heard: res.heard,
+    guessOptions: job.format === 'GUESS' ? job.facts.guess?.options : undefined,
   }).catch((e) => { office.failJob(id, `QA crashed: ${e.message}`); throw e; });
   await q(`UPDATE jobs SET video_path = $2, render = $3, qa = $4, status = $5, updated_at = now() WHERE id = $1`, [
     id, res.video, { clips: res.clips, seconds: res.seconds, music: res.music }, qa, qa.passed ? 'awaiting_approval' : 'render_failed',

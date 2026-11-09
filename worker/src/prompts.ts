@@ -71,8 +71,11 @@ ${fixHint ? `- FIX THESE PROBLEMS FROM THE LAST ATTEMPT: ${fixHint}\n` : ''}Retu
  "loop_check":"one sentence on how the last beat flows into the first"}`;
 }
 
-export function hooksUser(question: string, hook: string): string {
-  return `TASK: write the first line. The first 1.5 seconds decide whether a viewer swipes. Never name the #1 country or its value; the ending reveals it.
+export function hooksUser(question: string, hook: string, options?: string[]): string {
+  const opts = options?.length
+    ? `\nThe viewer picks from these options: ${options.join(', ')}. NEVER name any of them, not as a comparison ("4 times America's"), not to rule one out ("not India"), not as a question ("Is it the US?"), and no nicknames or demonyms (America, Americans, Chinese, Indian). Any line that names an option is thrown away.`
+    : '';
+  return `TASK: write the first line. The first 1.5 seconds decide whether a viewer swipes. Never name the #1 country or its value; the ending reveals it.${opts}
 QUESTION: ${question}
 CURRENT HOOK: ${hook}
 Write 5 alternative opening lines, max 9 words each, one per type:
