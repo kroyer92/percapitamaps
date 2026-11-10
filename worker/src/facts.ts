@@ -22,6 +22,9 @@ export interface Facts {
   ranking: RankRow[];
   ranking_note?: string; // what #1 means when the highest value is the "bad" end (Gini)
   world_median: string;
+  // Set when several countries share the lowest value (nuclear power: most countries at 0%). Then no
+  // single country is "last", and when at least half of them share it, the median says nothing.
+  bottom_tie?: BottomTie;
   top_vs_median?: string;
   top_vs_usa?: string;
   anchors: Record<string, { name: string; rank: string; of: string; value: string }>;
@@ -39,6 +42,34 @@ export interface Facts {
   map: Record<string, number>;
   decimals: number;
 }
+
+export interface BottomTie {
+  count: number;        // countries sharing the lowest shown value
+  of: number;           // countries ranked
+  above: number;        // countries above it
+  display: string;      // the shared value as shown, e.g. "0%"
+  none: boolean;        // every one of them is exactly 0: "has none at all"
+  median_at_floor: boolean; // at least half the countries share it, so the median is that value too
+}
+
+export function bottomTieOf(ranking: RankRow[]): BottomTie | undefined {
+  const last = ranking.at(-1);
+  if (!last) return undefined;
+  const tied = ranking.filter((r) => r.display === last.display);
+  if (tied.length < 2 || tied.length === ranking.length) return undefined;
+  return {
+    count: tied.length,
+    of: ranking.length,
+    above: ranking.length - tied.length,
+    display: last.display,
+    none: tied.every((r) => r.value === 0),
+    median_at_floor: tied.length * 2 >= ranking.length,
+  };
+}
+
+// The fewest countries that must be above the shared lowest value for a ranking video to have a
+// story: a top 5, a #1 and room for a guess. Below this the topic is dropped.
+export const MIN_ABOVE_FLOOR = 8;
 
 export function formatValue(v: number, ds: Pick<CatalogEntry, 'decimals' | 'prefix' | 'suffix'>): string {
   const abs = Math.abs(v);
@@ -142,6 +173,7 @@ export function buildFacts({ ds, series, population, format }: BuildInput): Fact
     ranking,
     ranking_note: HIGH_END[ds.id] ? `#1 is ${HIGH_END[ds.id].means}. Never call the top of this ranking the most equal or fairest.` : undefined,
     world_median: formatValue(med, ds),
+    bottom_tie: bottomTieOf(ranking),
     top_vs_median: ranking[0] ? ratioText(ranking[0].value, med) : undefined,
     top_vs_usa: ranking[0] && usa && ranking[0].iso3 !== 'USA' ? ratioText(ranking[0].value, usa.value) : undefined,
     anchors,
@@ -271,6 +303,7 @@ export function factsForLlm(f: Facts, format: Format, mentioned: string[] = []):
     top10: f.ranking.slice(0, 10).map((r) => ({ rank: String(r.rank), country: r.name, code: r.iso3, value: r.display })),
     bottom5: f.ranking.slice(-5).map((r) => ({ rank: String(r.rank), country: r.name, code: r.iso3, value: r.display })),
     world_median: f.world_median,
+    ...(f.bottom_tie ? { bottom_tie: bottomTieNote(f.bottom_tie) } : {}),
     anchors: Object.entries(f.anchors).map(([code, a]) => ({ country: a.name, code, rank: a.rank, of: a.of, value: a.value })),
   };
   const shown = new Set([...f.ranking.slice(0, 10), ...f.ranking.slice(-5)].map((r) => r.iso3).concat(Object.keys(f.anchors)));
@@ -295,6 +328,13 @@ export function factsForLlm(f: Facts, format: Format, mentioned: string[] = []):
   }
   out.source_line = f.source_line;
   return out;
+}
+
+// What the writer and the critic are told about a shared lowest value, so neither calls one of the
+// tied countries "last" or leans on a median that is just the floor.
+export function bottomTieNote(t: BottomTie): string {
+  const has = t.none ? 'have none (0)' : `are tied at ${t.display}`;
+  return `${t.count} of the ${t.of} countries ${has}. The bottom5 list is just ${t.count > 5 ? 'five of them' : 'them'}, in no real order: never call any single one of them last, lowest or at the bottom; say "${t.count} countries ${t.none ? 'have none' : `are tied at ${t.display}`}" instead.${t.median_at_floor ? ` Because at least half the countries are at ${t.display}, the world median is ${t.display} too: never use the median; say "only ${t.above} of ${t.of} countries are above ${t.display}" instead.` : ''}`;
 }
 
 export async function loadFacts(ds: CatalogEntry & { source_url?: string }, format: Format, ref = ds.ref): Promise<Facts> {
