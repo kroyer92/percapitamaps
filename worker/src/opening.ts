@@ -21,7 +21,7 @@ export const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 't
 // the payoff. None (a ranking without famous countries near the top) means the classic opening.
 export function anchorFor(f: Facts): RankRow | undefined {
   const byIso = new Map(f.ranking.map((r) => [r.iso3, r]));
-  return FAMOUS.map((iso) => byIso.get(iso)).find((r): r is RankRow => !!r && r.rank >= 2 && r.rank <= 15);
+  return FAMOUS.map((iso) => byIso.get(iso)).find((r): r is RankRow => !!r && r.rank >= 2 && r.rank <= 15 && r.display !== f.bottom_tie?.display); // a tied rank means nothing
 }
 
 export function openingFor(f: Facts): Opening | undefined {

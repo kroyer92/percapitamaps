@@ -4,7 +4,7 @@ import path from 'node:path';
 import { config, FORMAT_NAMES, type Format } from './config.js';
 import { one, q } from './db.js';
 import { getDataset } from './datasets.js';
-import { loadFacts, type Facts } from './facts.js';
+import { bottomTieOf, loadFacts, MIN_ABOVE_FLOOR, type Facts } from './facts.js';
 import { generateContent, NeedsHuman, type Content, type Hook } from './content.js';
 import { openingFor, spokenName, type Opening } from './opening.js';
 import { cutOnScreen, wordCount } from './validate.js';
@@ -101,6 +101,32 @@ async function claimTopic(preferred: Format) {
   );
 }
 
+// Videos rejected because the old wording called one of many tied countries "last" ("Last:
+// Zimbabwe 0%" in the nuclear Short) or showed a median that was just that shared value. The data
+// was fine, so the topic goes back in the queue once, to be made again with the new wording. A topic
+// that already has a newer job is left alone, so this never loops.
+export async function requeueTiedRejects(): Promise<string[]> {
+  const rows = await q<{ id: number; topic_id: number; facts: Facts; script: Content['script']; question: string }>(
+    `SELECT j.id, j.topic_id, j.facts, j.script, t.question FROM jobs j JOIN topics t ON t.id = j.topic_id
+     WHERE j.status = 'rejected' AND j.updated_at > now() - interval '7 days' AND t.status = 'skipped'
+       AND j.facts IS NOT NULL AND j.script IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM jobs j2 WHERE j2.topic_id = j.topic_id AND j2.id > j.id)`);
+  const back: string[] = [];
+  for (const r of rows) {
+    const tie = bottomTieOf(r.facts.ranking ?? []);
+    if (!tie || tie.above < MIN_ABOVE_FLOOR) continue;
+    const tied = new Set(r.facts.ranking.filter((x) => x.display === tie.display).map((x) => x.name));
+    const screens = (r.script?.beats ?? []).map((b) => b.on_screen ?? '');
+    const badLast = screens.some((t) => t.startsWith('Last: ') && [...tied].some((n) => t.includes(n)));
+    const badMedian = tie.median_at_floor && screens.some((t) => t === `World median: ${tie.display}`);
+    if (!badLast && !badMedian) continue;
+    await q(`UPDATE topics SET status = 'idea' WHERE id = $1 AND status = 'skipped'`, [r.topic_id]);
+    back.push(r.question);
+  }
+  if (back.length) await say(`↩️ Back in the queue with the fixed wording (no more "last" for a tied country): ${back.map((x) => `"${esc(x)}"`).join(', ')}`);
+  return back;
+}
+
 export async function produceOne(skips = 0): Promise<number | undefined> {
   const preferred = await pickFormat();
   const topic = await claimTopic(preferred);
@@ -138,6 +164,17 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
       await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [topic.id]);
       office.finished('writer', `Skipped "${topic.question}": top ${tied} tied, no clear #1`, id);
       await alert(`Skipped "${topic.question}": the top ${tied} countries are all at ${facts.ranking[0].display}, so there is no #1.${skips < 2 ? ' Trying the next topic.' : ''}`);
+      return skips < 2 ? produceOne(skips + 1) : undefined;
+    }
+    // Most countries at the same lowest value is fine (the script counts them instead of naming one
+    // as last), but with only a handful above it there is no top 5 to count down.
+    const bt = facts.bottom_tie;
+    if (format !== 'SCALE' && bt && bt.above < MIN_ABOVE_FLOOR) {
+      const why = `only ${bt.above} of ${bt.of} countries are above ${bt.display}`;
+      await q(`UPDATE jobs SET status = 'skipped', error = $2, updated_at = now() WHERE id = $1`, [id, why]);
+      await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [topic.id]);
+      office.finished('writer', `Skipped "${topic.question}": ${why}`, id);
+      await alert(`Skipped "${topic.question}": ${why}, so there is no top 5.${skips < 2 ? ' Trying the next topic.' : ''}`);
       return skips < 2 ? produceOne(skips + 1) : undefined;
     }
     // Ideas queued before the low-end check existed can still ask about the cheapest or poorest.

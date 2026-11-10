@@ -6,7 +6,7 @@
 // it writes that is not in the facts throws its reply away.
 import countries from 'i18n-iso-countries';
 import en from 'i18n-iso-countries/langs/en.json' with { type: 'json' };
-import type { Facts, RankRow } from './facts.js';
+import { bottomTieOf, type Facts, type RankRow } from './facts.js';
 import type { CatalogEntry } from './data/catalog.js';
 import { countryName } from './data/countries.js';
 
@@ -135,6 +135,9 @@ const finish = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/[.]+$/, '')
 export const HIDDEN_TOP = 3;
 const hiddenRows = (facts: Facts, hide: boolean) => (hide ? facts.ranking.filter((r) => r.rank <= HIDDEN_TOP) : []);
 
+// The shared lowest value, also for videos made before facts carried it.
+const tieOf = (facts: Facts) => facts.bottom_tie ?? bottomTieOf(facts.ranking ?? []);
+
 // "Same World Bank data (2024): ..." plus a line to compare with, like Niko's own reply.
 export function countryReply(facts: Facts, u: Unit, isos: string[], opener: string, hide = true): string | undefined {
   const rows = isos.map((iso) => facts.ranking.find((r) => r.iso3 === iso)).filter((r): r is RankRow => !!r);
@@ -146,18 +149,24 @@ export function countryReply(facts: Facts, u: Unit, isos: string[], opener: stri
   const secret = new Set(hiddenRows(facts, hide).map((r) => r.iso3));
   const top = rows.filter((r) => secret.has(r.iso3)).map((r) => r.name);
   const shown = rows.filter((r) => !secret.has(r.iso3)).sort((a, b) => a.rank - b.rank).slice(0, 4); // highest first, as in Niko's reply
+  // Inside a shared lowest value (most countries at 0% nuclear) a rank number means nothing.
+  const tie = tieOf(facts);
+  const tied = (r: RankRow) => !!tie && r.display === tie.display;
   if (shown.length === 1) {
     const r = shown[0];
-    parts.push(`${src}: ${r.name} is ${ordinal(r.rank)} highest of ${n} at ${valueText(r, u)}`);
+    parts.push(tied(r)
+      ? `${src}: ${r.name} is one of ${tie!.count} countries at ${valueText(r, u)}`
+      : `${src}: ${r.name} is ${ordinal(r.rank)} highest of ${n} at ${valueText(r, u)}`);
   } else if (shown.length > 1) {
-    const items = shown.map((r, i) => `${r.name} ${ordinal(r.rank)} at ${i === 0 ? valueText(r, u) : r.display}`);
+    const items = shown.map((r, i) => `${r.name} ${tied(r) ? '' : `${ordinal(r.rank)} `}at ${i === 0 ? valueText(r, u) : r.display}`);
     parts.push(`${src}, out of ${n} countries: ${listJoin(items)}`);
   }
   if (top.length) parts.push(`${listJoin(top)} ${top.length > 1 ? 'make' : 'makes'} the top ${HIDDEN_TOP}`);
   if (missing.length) parts.push(`${listJoin(missing.slice(0, 3))} ${missing.length > 1 ? "aren't" : "isn't"} in this ${facts.year_text} data`);
   if (shown.length || top.length) {
     const usa = facts.ranking.find((r) => r.iso3 === 'USA');
-    if (usa && !isos.includes('USA') && !secret.has('USA')) parts.push(`The US is ${ordinal(usa.rank)} at ${usa.display}`);
+    if (usa && !isos.includes('USA') && !secret.has('USA') && !tied(usa)) parts.push(`The US is ${ordinal(usa.rank)} at ${usa.display}`);
+    else if (tieOf(facts)?.median_at_floor) parts.push(`Only ${tieOf(facts)!.above} of ${n} countries are above ${tieOf(facts)!.display}`);
     else parts.push(`The world median is ${facts.world_median}`);
   }
   if (!shown.length) parts[0] = `${src}: ${parts[0]}`;
@@ -273,11 +282,15 @@ const cleanNum = (s: string) => s.replace(/,/g, '').replace(/\.0+$/, '');
 // With `hide`, the top of the ranking is left out, so the model can't give the answer away.
 export function factSheet(facts: Facts, u: Unit, hide = true): string[] {
   const n = facts.countries_count || facts.ranking.length;
+  const tie = tieOf(facts);
   const from = hide ? HIDDEN_TOP : 0;
   const lines = [
     `Metric: ${facts.title} (${facts.unit}), ${shortSource(u.sourceName)} data, year ${facts.year_text}, ${n} countries ranked, highest first`,
     `Meaning: ${metricMeaning(facts, u)}`,
-    `World median: ${facts.world_median}`,
+    tie?.median_at_floor
+      ? `Only ${tie.above} of ${n} countries are above ${tie.display} (so there is no meaningful median)`
+      : `World median: ${facts.world_median}`,
+    ...(tie ? [`${tie.count} countries are tied at ${tie.display}: none of them is "last" and their rank numbers mean nothing; never call one of them last or lowest or give its rank`] : []),
     ...(hide ? [`#1 to #${HIDDEN_TOP}: secret (the answer to the video's question). Never name, hint at or rank them`] : []),
     ...facts.ranking.slice(from, from + 5).map((r) => `#${r.rank} ${r.name}: ${r.display}`),
     ...facts.ranking.slice(-3).map((r) => `#${r.rank} ${r.name}: ${r.display}`),

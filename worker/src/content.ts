@@ -43,14 +43,14 @@ export function wordsFor(band?: string): [number, number] {
   return [Math.round(lo * 3), Math.round(hi * 3)]; // the voice speaks about 3 words a second
 }
 
-async function writeScript(question: string, format: Format, system: string, allowed: Set<string>, words: [number, number], spoiler: Spoiler | undefined, fillers: Filler[], twist?: string, fixHint?: string, onStep: (s: string) => void = () => {}): Promise<Script> {
+async function writeScript(question: string, format: Format, system: string, allowed: Set<string>, words: [number, number], spoiler: Spoiler | undefined, fillers: Filler[], twist?: string, fixHint?: string, onStep: (s: string) => void = () => {}, tiedNames: string[] = []): Promise<Script> {
   let hint = fixHint;
   let last: string[] = [];
   let best: { script: Script; minor: number } | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
     onStep(`Writing the script, try ${attempt + 1} of 3`);
     const script = await chatJson<Script>({ temperature: 0.6, system, user: P.scriptUser(question, format, words, twist, hint), numPredict: 2000 });
-    const errors = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, fillers);
+    const errors = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, fillers, tiedNames);
     if (!errors.length) return script;
     onStep(`Try ${attempt + 1} had problems: ${errors.map((e) => e.replace('(minor) ', '')).join(' | ')}`);
     if (errors.every(isMinor) && (!best || errors.length < best.minor)) best = { script, minor: errors.length };
@@ -171,6 +171,7 @@ export async function generateContent(opts: {
   const llmFacts = factsForLlm(facts, format, mentioned);
   const system = P.contentSystem(JSON.stringify(llmFacts));
   const allowed = allowedNumbers(llmFacts, question);
+  const tiedNames = facts.bottom_tie ? facts.ranking.filter((r) => r.display === facts.bottom_tie!.display).map((r) => r.name) : [];
   const words = wordsFor(opts.lengthBand);
   // SCALE has no single winner to hide.
   // Ranks 2-6 first, then the anchor countries (e.g. USA, UK), all straight from FACTS.
@@ -193,11 +194,11 @@ export async function generateContent(opts: {
       script = await writePlanned(system, slots, spoiler?.name ?? '', fixHint, onStep, opts.recentLines, names, facts.unit);
       // The plan sets the length, so only real problems (numbers, codes) stop a planned script.
       // No fillers: padding a planned script added 3 extra rank lines and pushed job #16 to 63 s.
-      const left = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, [])
+      const left = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, [], tiedNames)
         .filter((e) => !isMinor(e) && !e.startsWith('Total spoken words'));
       if (left.length) throw new NeedsHuman('The planned script failed the code checks.', left);
     } else {
-      script = await writeScript(question, format, system, allowed, words, spoiler, fillers, opts.twist, fixHint, onStep);
+      script = await writeScript(question, format, system, allowed, words, spoiler, fillers, opts.twist, fixHint, onStep, tiedNames);
     }
     let originalHook = script.beats[0].vo;
 

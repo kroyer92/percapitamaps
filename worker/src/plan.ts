@@ -21,7 +21,7 @@ export interface Slot {
 }
 
 // "the United States", "the Netherlands"; plain names otherwise.
-const THE = /^(United |Netherlands|Philippines|Czech|Central African|Dominican|Democratic|Gambia|Bahamas|Maldives|Solomon|Marshall|Comoros|Seychelles)/;
+const THE = /^(United |Netherlands|Philippines|Czech Republic|Central African|Dominican|Democratic|Gambia|Bahamas|Maldives|Solomon|Marshall|Comoros|Seychelles)/;
 const the = (name: string) => (THE.test(name) ? `the ${name}` : name);
 const The = (name: string) => (THE.test(name) ? `The ${name}` : name);
 
@@ -115,6 +115,7 @@ function guessSlot({ f, u, question }: Ctx, minRank: number, visual: (iso: strin
   const byIso = new Map(f.ranking.map((r) => [r.iso3, r]));
   const options = BIG_GUESSES.map((iso) => byIso.get(iso))
     .filter((r): r is RankRow => !!r && r.rank > minRank && r.iso3 !== f.ranking.at(-1)?.iso3) // the closer names the last one
+    .filter((r) => !f.bottom_tie || r.display !== f.bottom_tie.display) // tied at the bottom: its rank means nothing
     .sort((a, b) => a.rank - b.rank)
     .slice(0, 3);
   const guess = options.at(hash(f.dataset_id ?? question) % Math.max(1, options.length));
@@ -136,19 +137,40 @@ function guessSlot({ f, u, question }: Ctx, minRank: number, visual: (iso: strin
   };
 }
 
-const medianSlot = ({ f, u }: Ctx, visual: string): Slot => ({
-  role: 'contender',
-  brief: `Context: the typical country (the world median) has just ${withUnit(f.world_median, u)}.`,
-  numbers: [f.world_median],
-  fallback: `The typical country has just ${withUnit(f.world_median, u)}.`,
-  alts: [
-    `For comparison, the world median is ${withUnit(f.world_median, u)}.`,
-    `Half of all countries have less than ${withUnit(f.world_median, u)}.`,
-    `A country in the middle of the pack has ${withUnit(f.world_median, u)}.`,
-  ],
-  visual,
-  on_screen: `World median: ${f.world_median}`,
-});
+// The "typical country" beat. When at least half the countries share the lowest value (nuclear
+// power: most countries at 0%), the median is just that value and says nothing, so the beat says how
+// few countries are above it instead.
+function medianSlot({ f, u }: Ctx, visual: string): Slot {
+  const t = f.bottom_tie;
+  if (t?.median_at_floor) {
+    const line = t.none ? `Only ${t.above} of ${t.of} countries have any at all.` : `Only ${t.above} of ${t.of} countries are above ${withUnit(t.display, u)}.`;
+    return {
+      role: 'contender',
+      brief: `Context: ${t.count} of the ${t.of} countries ${t.none ? 'have none at all (0)' : `sit at ${withUnit(t.display, u)}`}. Say that only ${t.above} of ${t.of} countries ${t.none ? 'have any at all' : `are above ${withUnit(t.display, u)}`}. Do not mention the median or name any country.`,
+      numbers: [String(t.above), String(t.of)],
+      fallback: line,
+      alts: t.none ? [
+        `Just ${t.above} of ${t.of} countries have any at all.`,
+        `Most countries have none: only ${t.above} of ${t.of} have any.`,
+      ] : [`Just ${t.above} of ${t.of} countries are above ${withUnit(t.display, u)}.`],
+      visual,
+      on_screen: t.none ? `Only ${t.above} of ${t.of} countries have any` : `Only ${t.above} of ${t.of} above ${t.display}`,
+    };
+  }
+  return {
+    role: 'contender',
+    brief: `Context: the typical country (the world median) has just ${withUnit(f.world_median, u)}.`,
+    numbers: [f.world_median],
+    fallback: `The typical country has just ${withUnit(f.world_median, u)}.`,
+    alts: [
+      `For comparison, the world median is ${withUnit(f.world_median, u)}.`,
+      `Half of all countries have less than ${withUnit(f.world_median, u)}.`,
+      `A country in the middle of the pack has ${withUnit(f.world_median, u)}.`,
+    ],
+    visual,
+    on_screen: `World median: ${f.world_median}`,
+  };
+}
 
 // #5, #4, #3, #2 (or a shorter run), each with its own angle.
 const contenderSlots = ({ f, u, seed }: Ctx, from: number, visual: (iso: string) => string): Slot[] =>
@@ -193,7 +215,27 @@ function closerSlot({ f, top }: Ctx, visual: string): Slot | undefined {
     };
   }
   // The reveal already gives the multiple of the median, so the closer contrasts the top with the
-  // bottom instead of saying the same thing twice.
+  // bottom instead of saying the same thing twice. When several countries share the lowest value,
+  // none of them is "last" (the nuclear Short called Zimbabwe last, one of ~100 countries at 0%),
+  // so the closer counts them instead of naming one.
+  const t = f.bottom_tie;
+  if (t) {
+    const line = t.none ? `Meanwhile, ${t.count} countries have none at all.` : `At the other end, ${t.count} countries are tied at ${withUnit(t.display, f.unit)}.`;
+    return {
+      role: 'closer',
+      brief: `A closing line: at the other end, ${t.count} countries ${t.none ? 'have none at all (0)' : `are tied at ${withUnit(t.display, f.unit)}`}. Do not name any of them and never call one country last. End on that contrast, so the video can loop back to the question.`,
+      numbers: [String(t.count)],
+      fallback: line,
+      alts: t.none ? [
+        `At the other end, ${t.count} countries have none at all.`,
+        `And ${t.count} countries have exactly none.`,
+      ] : [
+        `${t.count} countries share last place, at ${withUnit(t.display, f.unit)}.`,
+      ],
+      visual,
+      on_screen: t.none ? `${t.count} countries: none at all` : `${t.count} countries tied at ${t.display}`,
+    };
+  }
   const last = f.ranking.at(-1);
   if (last && last.iso3 !== top.iso3) {
     return {
@@ -273,14 +315,15 @@ export function planFor(format: Format, question: string, f: Facts, opening?: Op
         visual: `race_year:${s.start_year}`,
         on_screen: `${s.start_year}: #1 ${then[0]}`,
       },
-      {
+      // Skipped when the median didn't move or sits at the shared lowest value ("0% → 0%").
+      s.start_median !== f.world_median && !f.bottom_tie?.median_at_floor ? {
         role: 'then',
         brief: `Back then, the typical country had ${withUnit(s.start_median, c.u)}; today it is ${withUnit(f.world_median, c.u)}.`,
         numbers: [s.start_median, f.world_median],
         fallback: `The typical country went from ${withUnit(s.start_median, c.u)} to ${withUnit(f.world_median, c.u)}.`,
         visual: `race_year:${Math.round((s.start_year + f.year) / 2)}`,
         on_screen: `Median: ${s.start_median} → ${f.world_median}`,
-      },
+      } as Slot : undefined,
       ...now.slice(1).reverse().map((r, i): Slot => ({
         role: 'contender',
         brief: `Today ${the(r.name)} is number ${r.rank} with ${withUnit(r.display, c.u)}. ${ANGLES[(c.seed + i + 1) % ANGLES.length]}`,

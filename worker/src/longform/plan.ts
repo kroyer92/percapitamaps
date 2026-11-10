@@ -4,7 +4,7 @@
 import { HIGH_END, type CatalogEntry } from '../data/catalog.js';
 import { fetchSeries } from '../data/fetch.js';
 import { countryName } from '../data/countries.js';
-import { buildFacts, formatValue, type Facts, type RankRow } from '../facts.js';
+import { buildFacts, formatValue, MIN_ABOVE_FLOOR, type Facts, type RankRow } from '../facts.js';
 import type { Beat } from '../validate.js';
 import { THEMES, type Theme } from './themes.js';
 
@@ -68,6 +68,7 @@ export function unusable(ds: Dataset, facts: Facts): string | undefined {
   if (facts.ranking.length < 30) return `only ${facts.ranking.length} countries have data`;
   const tied = facts.ranking.filter((r) => r.display === facts.ranking[0].display).length;
   if (tied >= 2) return `the top ${tied} are tied at ${facts.ranking[0].display}`;
+  if (facts.bottom_tie && facts.bottom_tie.above < MIN_ABOVE_FLOOR) return `only ${facts.bottom_tie.above} countries are above ${facts.bottom_tie.display}`;
   return undefined;
 }
 
@@ -101,7 +102,14 @@ export function segmentBeats(n: number, total: number, ds: Dataset, facts: Facts
     vo: last ? `And the last map, map ${n}: ${what}.` : v([`Map ${n}: ${what}.`, `On to map ${n}: ${what}.`, `Map ${n} is ${what}.`]),
     on_screen: facts.title, visual: 'title',
   });
-  beats.push({
+  const tie = facts.bottom_tie;
+  beats.push(tie?.median_at_floor ? {
+    // Most countries share the lowest value, so "half are below 0%" would say nothing.
+    vo: tie.none
+      ? v([`Brighter blue means more. Only ${tie.above} of ${tie.of} countries have any at all.`, `Here is the whole world. Just ${tie.above} of ${tie.of} countries have any.`])
+      : v([`Brighter blue means more. Only ${tie.above} of ${tie.of} countries are above ${tie.display}.`]),
+    on_screen: tie.none ? `Only ${tie.above} of ${tie.of} countries have any` : `Only ${tie.above} of ${tie.of} above ${tie.display}`, visual: 'map_fill',
+  } : {
     vo: v([
       `Brighter blue means more. Half of all ${facts.countries_count} countries are below ${facts.world_median}.`,
       `The brighter the blue, the higher the number. The middle country sits at ${facts.world_median}.`,
@@ -133,7 +141,9 @@ export function segmentBeats(n: number, total: number, ds: Dataset, facts: Facts
       on_screen: `${c} ${c === 1 ? 'country has' : 'countries have'} ${facts.threshold.label}`, visual: 'threshold',
     });
   }
-  const anchorIso = ['USA', 'GBR', 'DEU', 'IND'].find((iso) => facts.anchors[iso] && !top.some((t) => t.iso3 === iso));
+  // A country inside the shared lowest value has no real rank ("number 87" of 100 countries at 0%).
+  const inTie = (iso: string) => !!tie && r.find((x) => x.iso3 === iso)?.display === tie.display;
+  const anchorIso = ['USA', 'GBR', 'DEU', 'IND'].find((iso) => facts.anchors[iso] && !top.some((t) => t.iso3 === iso) && !inTie(iso));
   if (anchorIso) {
     const a = facts.anchors[anchorIso];
     const row = r.find((x) => x.iso3 === anchorIso)!;
@@ -144,7 +154,7 @@ export function segmentBeats(n: number, total: number, ds: Dataset, facts: Facts
     extraIsos.push(anchorIso);
   }
   // The two biggest countries by population, where viewers often come from.
-  const giants = ['CHN', 'IND'].filter((iso) => iso !== anchorIso && !top.some((t) => t.iso3 === iso)).map((iso) => r.find((x) => x.iso3 === iso)).filter((x): x is RankRow => !!x);
+  const giants = ['CHN', 'IND'].filter((iso) => iso !== anchorIso && !top.some((t) => t.iso3 === iso) && !inTie(iso)).map((iso) => r.find((x) => x.iso3 === iso)).filter((x): x is RankRow => !!x);
   if (giants.length === 2) {
     beats.push({
       vo: `The two biggest countries? ${giants[0].name} is ${ordinal(giants[0].rank)}, at ${spoken(giants[0], ds)}, and ${giants[1].name} is ${ordinal(giants[1].rank)}, at ${spoken(giants[1], ds)}.`,
@@ -164,7 +174,15 @@ export function segmentBeats(n: number, total: number, ds: Dataset, facts: Facts
   }
   const bottom = r[r.length - 1];
   const gap = ratio(first.value, bottom.value);
-  if (bottom && bottom.iso3 !== first.iso3) {
+  if (tie) {
+    // Several countries share the lowest value: none of them is "last", so count them instead.
+    beats.push({
+      vo: tie.none
+        ? v([`At the other end, ${tie.count} countries have none at all.`, `And ${tie.count} countries have none at all.`])
+        : `At the other end, ${tie.count} countries are tied at ${spoken({ display: tie.display }, ds)}.`,
+      on_screen: tie.none ? `${tie.count} countries: none at all` : `${tie.count} countries tied at ${tie.display}`, visual: 'map_fill',
+    });
+  } else if (bottom && bottom.iso3 !== first.iso3) {
     beats.push({
       vo: `${v(['At the other end', 'At the very bottom', 'And last'])}: ${inSentence(bottom.name)}, at ${spoken(bottom, ds)}.${gap ? ` Number one has ${gap} as much.` : ''}`,
       on_screen: `Last: ${bottom.name}`, visual: `fact:${bottom.iso3}`,

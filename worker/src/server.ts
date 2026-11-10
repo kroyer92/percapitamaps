@@ -5,7 +5,7 @@ import express from 'express';
 import { config } from './config.js';
 import { applySchema, one, q } from './db.js';
 import { queue } from './lib/queue.js';
-import { produceOne, cleanupOldRenders } from './produce.js';
+import { produceOne, cleanupOldRenders, requeueTiedRejects } from './produce.js';
 import { discover } from './discover.js';
 import { instagramDue, linkVideo } from './publish.js';
 import { dueSnapshots, storeChannel, storeSnapshot, weeklyReport } from './analytics.js';
@@ -173,6 +173,8 @@ setInterval(async () => {
   // A long-form upload that never reported back is sent to WF3 again (longform/make.ts).
   await retryStuckUploads().catch((e) => console.error('[longform] upload retry', e.message));
   await sendRelatedWhenPublic().catch((e) => console.error('[longform] related list', e.message));
+  // A Short rejected over the old "last place" wording for tied countries is made again (produce.ts).
+  await requeueTiedRejects().catch((e) => console.error('[requeue tied]', e.message));
   const day = new Date().toISOString().slice(0, 10);
   if (longformQueued === day) return;
   try {

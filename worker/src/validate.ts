@@ -58,7 +58,17 @@ function similar(a: string, b: string): boolean {
   return shared / Math.min(x.size, y.size) >= 0.75;
 }
 
-export function checkScript(script: Script, allowed: Set<string>, words: [number, number], spoiler?: Spoiler, fillers: Filler[] = []): string[] {
+// When several countries share the lowest value (most countries at 0% nuclear), calling one of them
+// "last" or "lowest" is false: the nuclear Short said "Last: Zimbabwe 0%".
+const LAST_WORDS = /\b(last|lowest|bottom|least|fewest|worst)\b/i;
+export function tiedLastProblem(text: string, tiedNames: string[]): string | undefined {
+  if (!tiedNames.length || !LAST_WORDS.test(text)) return undefined;
+  const t = text.toLowerCase();
+  const name = tiedNames.find((n) => t.includes(n.toLowerCase()));
+  return name ? `calls ${name} last or lowest, but it is one of ${tiedNames.length} countries tied at the bottom. Count them instead ("${tiedNames.length} countries...") and name none of them` : undefined;
+}
+
+export function checkScript(script: Script, allowed: Set<string>, words: [number, number], spoiler?: Spoiler, fillers: Filler[] = [], tiedNames: string[] = []): string[] {
   const errors: string[] = [];
   if (!script || !Array.isArray(script.beats)) return ['Output has no "beats" array.'];
   errors.push(...fixVisuals(script.beats));
@@ -82,6 +92,8 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
       errors.push(minor(`Beat ${i + 1} gives away the answer (${spoiler!.name} / ${spoiler!.value}). Save it for the final third.`));
     const twin = b.filler ? -1 : beats.findIndex((o, j) => j < i && !o.filler && o.vo && similar(o.vo, b.vo));
     if (twin >= 0) errors.push(minor(`Beat ${i + 1} repeats beat ${twin + 1}. Say something new.`));
+    const tied = tiedLastProblem(`${b.vo} ${b.on_screen ?? ''}`, tiedNames);
+    if (tied) errors.push(`Beat ${i + 1} ${tied}.`);
     for (const n of [...numbersIn(b.vo), ...numbersIn(b.on_screen ?? '')]) {
       if (!allowed.has(n)) errors.push(`Beat ${i + 1} uses the number ${n}, which is not in FACTS. Copy numbers exactly from FACTS.`);
     }
