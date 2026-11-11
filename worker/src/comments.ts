@@ -79,39 +79,96 @@ export function unansweredYoutube(p: YtPayload): ViewerComment[] {
 
 let igUsername: string | undefined;
 
+// Meta's answer when the token may not read comments ((#10) / (#200) / "permission").
+export function igPermissionError(msg: string): boolean {
+  return /\(#(10|200|190)\)|permission|scope|not authorized/i.test(msg);
+}
+
+export function igFixText(msg: string): string {
+  if (!igPermissionError(msg)) return `Instagram said: ${msg.slice(0, 200)}`;
+  return [
+    'The Instagram token is not allowed to read comments (it lacks <code>instagram_business_manage_comments</code>).',
+    'Fix, once: developers.facebook.com → your app → Instagram → API setup with Instagram login → add the permission <code>instagram_business_manage_comments</code> → Generate token for @PerCapitaMaps.',
+    'Put the new token in <code>/opt/percapita/app/.env</code> as INSTAGRAM_ACCESS_TOKEN, then run:',
+    `<code>cd /opt/percapita && docker compose exec postgres psql -U percapita -d percapita -c "DELETE FROM settings WHERE key='instagram_token';" && docker compose up -d</code>`,
+  ].join('\n');
+}
+
+// Every Reel on the account from the last 30 days, not only the ones WF4 posted (a Reel posted
+// by hand, or one WF4 marked failed that still went up, gets its comments read too). The jobs
+// table is the fallback when the account's media list can't be read.
+async function recentMedia(token: string): Promise<{ id: string; permalink?: string; count?: number }[]> {
+  const byId = new Map<string, { id: string; permalink?: string; count?: number }>();
+  const cutoff = Date.now() - MAX_AGE_DAYS * 86_400_000;
+  try {
+    const res = await ig(`${config.instagramUserId}/media`, { fields: 'id,permalink,timestamp,comments_count', limit: '50', access_token: token }, 'GET');
+    for (const m of res.data ?? []) {
+      if (+new Date(m.timestamp) < cutoff) continue;
+      byId.set(m.id, { id: m.id, permalink: m.permalink, count: m.comments_count });
+    }
+  } catch (e: any) {
+    console.warn('[comments] Instagram media list failed, using the jobs table:', e.message);
+  }
+  const jobs = await q<{ ig_media_id: string }>(
+    `SELECT ig_media_id FROM jobs WHERE ig_media_id IS NOT NULL AND ig_due_at > now() - interval '${MAX_AGE_DAYS} days'`);
+  for (const j of jobs) if (!byId.has(j.ig_media_id)) byId.set(j.ig_media_id, { id: j.ig_media_id });
+  return [...byId.values()];
+}
+
+// Pure: the comments and replies on one Reel that the account has not answered yet.
+export function unansweredInstagram(mediaId: string, permalink: string, data: any[], own: string | undefined): ViewerComment[] {
+  const out: ViewerComment[] = [];
+  const isOwn = (x: any) => !!own && x.username === own;
+  for (const c of data ?? []) {
+    const replies: any[] = c.replies?.data ?? [];
+    const answered = (x: any) => replies.some((r) => isOwn(r) && +new Date(r.timestamp) > +new Date(x.timestamp) && (x === c || String(r.text ?? '').includes(`@${x.username}`)));
+    for (const x of [c, ...replies]) {
+      if (isOwn(x) || answered(x)) continue;
+      out.push({ platform: 'instagram', id: x.id, video_id: mediaId, author: x.username ?? 'someone', text: x.text ?? '', published_at: x.timestamp, link: permalink });
+    }
+  }
+  return out;
+}
+
 async function instagramComments(): Promise<ViewerComment[]> {
   if (!config.instagramToken || !config.instagramUserId) return [];
-  const media = await q<{ ig_media_id: string }>(
-    `SELECT ig_media_id FROM jobs WHERE ig_status = 'posted' AND ig_media_id IS NOT NULL AND ig_due_at > now() - interval '${MAX_AGE_DAYS} days'`);
-  if (!media.length) return [];
   const token = await igToken();
+  const out: ViewerComment[] = [];
+  const errors: string[] = [];
+  let read = 0;
   try {
     igUsername ??= (await ig('me', { fields: 'username', access_token: token }, 'GET')).username as string;
-    const out: ViewerComment[] = [];
-    for (const m of media) {
-      const info = await ig(m.ig_media_id, { fields: 'permalink', access_token: token }, 'GET');
-      const res = await ig(`${m.ig_media_id}/comments`, { fields: 'id,text,username,timestamp,replies{id,text,username,timestamp}', limit: '50', access_token: token }, 'GET');
-      for (const c of res.data ?? []) {
-        const replies: any[] = c.replies?.data ?? [];
-        const own = (x: any) => x.username === igUsername;
-        const answeredBy = (x: any) => replies.some((r) => own(r) && +new Date(r.timestamp) > +new Date(x.timestamp) && (x === c || String(r.text ?? '').includes(`@${x.username}`)));
-        for (const x of [c, ...replies]) {
-          if (own(x) || answeredBy(x)) continue;
-          out.push({ platform: 'instagram', id: x.id, video_id: m.ig_media_id, author: x.username ?? 'someone', text: x.text ?? '', published_at: x.timestamp, link: info.permalink ?? '' });
-        }
-      }
+  } catch (e: any) {
+    errors.push(String(e.message ?? e));
+  }
+  const media = errors.length ? [] : await recentMedia(token);
+  for (const m of media) {
+    if (m.count === 0) continue; // nothing to read, saves a call
+    try {
+      const permalink = m.permalink ?? (await ig(m.id, { fields: 'permalink', access_token: token }, 'GET')).permalink ?? '';
+      const res = await ig(`${m.id}/comments`, { fields: 'id,text,username,timestamp,replies{id,text,username,timestamp}', limit: '50', access_token: token }, 'GET');
+      out.push(...unansweredInstagram(m.id, permalink, res.data ?? [], igUsername));
+      read++;
+    } catch (e: any) {
+      // One deleted or broken Reel must not hide the comments on all the others.
+      errors.push(String(e.message ?? e));
+      console.warn(`[comments] Instagram media ${m.id}:`, e.message);
     }
+  }
+  console.log(`[comments] Instagram: ${media.length} Reels, ${read} read, ${out.length} unanswered, ${errors.length} errors`);
+  if (read > 0 || !errors.length) {
     await setSetting('ig_comments_error', null);
     return out;
-  } catch (e: any) {
-    // Usually a token without the comments permission. Say it once, not every hour.
-    const msg = String(e.message ?? e);
-    if ((await getSetting<string | null>('ig_comments_error')) !== msg) {
-      await setSetting('ig_comments_error', msg);
-      await say(`⚠️ Instagram comments can't be read: ${esc(msg.slice(0, 200))}\nYouTube comments still come through. Paste this message to Claude in the project chat to get the exact fix.`);
-    }
-    return [];
   }
+  // Nothing could be read. Say why with the exact fix, again once a day while it stays broken.
+  const msg = errors[0];
+  const prev = await getSetting<{ msg: string; at: string } | string | null>('ig_comments_error');
+  const last = prev && typeof prev === 'object' ? prev : undefined;
+  if (!last || last.msg !== msg || Date.now() - +new Date(last.at) > 86_400_000) {
+    await setSetting('ig_comments_error', { msg, at: new Date().toISOString() });
+    await say(`⚠️ <b>Instagram comments are not coming through.</b> YouTube comments still do.\n${igFixText(esc(msg))}`);
+  }
+  return out;
 }
 
 // ---------- shared ----------
