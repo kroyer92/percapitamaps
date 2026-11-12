@@ -3,7 +3,7 @@ import React, { useMemo } from 'react';
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import { createTikTokStyleCaptions } from '@remotion/captions';
 import { C, FONT, SAFE, W, ZONE } from '../theme';
-import type { ShortProps, TimedBeat } from '../types';
+import type { CaptionWord, ShortProps, TimedBeat } from '../types';
 
 export function currentBeat(beats: TimedBeat[], frame: number): { beat: TimedBeat; index: number } {
   let index = 0;
@@ -39,7 +39,19 @@ export const Kicker: React.FC<{ text: string; top?: number; from?: number }> = (
 // `low`: under the rank strip, a little lower and smaller, so it clears the strip and the kicker
 // above it and the answer's big number below it.
 const STRIP_HEADLINE = { top: 470, height: 146 };
-export const Headline: React.FC<{ beats: TimedBeat[]; low?: boolean }> = ({ beats, low }) => {
+
+// When each word of the hook headline is spoken. The timed words come from what the speech checker
+// heard, which can split or join words differently from the script, so the headline keeps the
+// script's own words and spreads them over the heard timings by position.
+function spokenAt(text: string, timed: CaptionWord[]): { text: string; start: number }[] {
+  const ws = text.trim().split(/\s+/);
+  if (!timed.length) return ws.map((w) => ({ text: w, start: Infinity }));
+  return ws.map((w, i) => ({ text: w, start: timed[Math.min(timed.length - 1, Math.floor((i * timed.length) / ws.length))].start }));
+}
+
+// `spoken`: the hook's timed words. The headline is then the line the voice says, and the word
+// being spoken is blue (the one-text opening of Countdown and Guess).
+export const Headline: React.FC<{ beats: TimedBeat[]; low?: boolean; spoken?: CaptionWord[] }> = ({ beats, low, spoken }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const { beat, index } = currentBeat(beats, frame);
@@ -55,7 +67,9 @@ export const Headline: React.FC<{ beats: TimedBeat[]; low?: boolean }> = ({ beat
         display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
         <div style={{ fontFamily: FONT, fontWeight: 900, fontSize: size, lineHeight: 1.02, color: C.pale, letterSpacing: -2,
           transform: `scale(${1.1 - 0.1 * s})`, textWrap: 'balance' as any, textShadow: '0 6px 30px rgba(0,0,0,0.6)' }}>
-          {text}
+          {spoken?.length ? spokenAt(text, spoken).map((w, i, all) => (
+            <span key={i} style={{ color: frame >= w.start && frame < (all.slice(i + 1).find((x) => x.start > w.start)?.start ?? spoken[spoken.length - 1].end + 6) ? C.blue : C.pale }}>{w.text} </span>
+          )) : text}
         </div>
       </div>
     );
