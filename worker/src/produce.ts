@@ -20,6 +20,35 @@ import { localDate } from './lib/time.js';
 import type { VoiceClip } from './voice.js';
 import type { MusicPick } from './audio.js';
 import * as office from './activity.js';
+import { queue } from './lib/queue.js';
+
+// A data source or model that is down or too slow is a passing problem, not a bad topic. Such a
+// job is tried again by itself (twice, 20 and 40 minutes later) and the topic keeps its place.
+export const AUTO_RETRIES = 2;
+const RETRY_MINUTES = [20, 40];
+
+export function isTemporary(e: any): boolean {
+  if (e?.temporary || e?.name === 'TimeoutError' || e?.name === 'AbortError') return true;
+  const msg = String(e?.message ?? e);
+  return /timeout|timed out|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|did not answer|\b(429|50[0-4])\b/i.test(msg);
+}
+
+function retryLater(retry: number): string {
+  const minutes = RETRY_MINUTES[retry] ?? RETRY_MINUTES[RETRY_MINUTES.length - 1];
+  setTimeout(() => queue.add('produce', async () => { await produceOne(0, retry + 1); }), minutes * 60_000).unref?.();
+  return `I'll try again by myself in ${minutes} minutes`;
+}
+
+function retryPreviewLater(id: number, tries: number) {
+  setTimeout(() => queue.add('preview', async () => {
+    try {
+      await sendPreview(id);
+    } catch (e: any) {
+      if (tries < 3) return retryPreviewLater(id, tries + 1);
+      await alert(`Job #${id}'s preview still could not be sent (${e.message}). The video is saved; send /produce or wait for the next run.`);
+    }
+  }), 5 * 60_000).unref?.();
+}
 
 export interface JobRow {
   id: number;
@@ -127,7 +156,7 @@ export async function requeueTiedRejects(): Promise<string[]> {
   return back;
 }
 
-export async function produceOne(skips = 0): Promise<number | undefined> {
+export async function produceOne(skips = 0, retry = 0): Promise<number | undefined> {
   const preferred = await pickFormat();
   const topic = await claimTopic(preferred);
   if (!topic) {
@@ -149,8 +178,10 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
   );
   const id = job!.id;
   office.working('writer', `Picked "${topic.question}" and is loading the data`, id);
+  const stage = { now: `loading the data (${ds.sourceName ?? ds.id})` };
   try {
     const facts = await loadFacts(ds, format);
+    stage.now = 'writing the script';
     if (format === 'THEN_NOW' && (!facts.series || facts.series.years.length < 10)) {
       format = 'MAP_REVEAL';
       await q('UPDATE jobs SET format = $2 WHERE id = $1', [id, format]);
@@ -164,7 +195,7 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
       await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [topic.id]);
       office.finished('writer', `Skipped "${topic.question}": top ${tied} tied, no clear #1`, id);
       await alert(`Skipped "${topic.question}": the top ${tied} countries are all at ${facts.ranking[0].display}, so there is no #1.${skips < 2 ? ' Trying the next topic.' : ''}`);
-      return skips < 2 ? produceOne(skips + 1) : undefined;
+      return skips < 2 ? produceOne(skips + 1, retry) : undefined;
     }
     // Most countries at the same lowest value is fine (the script counts them instead of naming one
     // as last), but with only a handful above it there is no top 5 to count down.
@@ -175,7 +206,7 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
       await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [topic.id]);
       office.finished('writer', `Skipped "${topic.question}": ${why}`, id);
       await alert(`Skipped "${topic.question}": ${why}, so there is no top 5.${skips < 2 ? ' Trying the next topic.' : ''}`);
-      return skips < 2 ? produceOne(skips + 1) : undefined;
+      return skips < 2 ? produceOne(skips + 1, retry) : undefined;
     }
     // Ideas queued before the low-end check existed can still ask about the cheapest or poorest.
     const low = lowEndProblem(topic.question, topic.dataset_id);
@@ -184,7 +215,7 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
       await q(`UPDATE topics SET status = 'skipped' WHERE id = $1`, [topic.id]);
       office.finished('writer', `Skipped "${topic.question}": ${low}`, id);
       await alert(`Skipped "${topic.question}": it ${low}.${skips < 2 ? ' Trying the next topic.' : ''}`);
-      return skips < 2 ? produceOne(skips + 1) : undefined;
+      return skips < 2 ? produceOne(skips + 1, retry) : undefined;
     }
     // The last 10 scripts, so the writer can steer clear of wording they already used.
     const recent = await q<{ script: Content['script'] }>(`SELECT script FROM jobs WHERE script IS NOT NULL AND id <> $1 ORDER BY id DESC LIMIT 10`, [id]);
@@ -202,22 +233,37 @@ export async function produceOne(skips = 0): Promise<number | undefined> {
     );
     office.finished('writer', `Script ready: "${content.packaging.title}"`, id);
     await unloadModels();
-    await renderAndPreview(id);
+    await renderAndPreview(id, false, stage);
     return id;
   } catch (e: any) {
     const human = e instanceof NeedsHuman;
+    // Rendered and checked fine, only the Telegram preview failed: keep the video, send it again.
+    if (stage.now === 'sending the preview' && isTemporary(e)) {
+      await alert(`Job #${id} (${topic.question}) is made, but sending the preview failed: ${e.message}\nNothing to do: I'll send it again in 5 minutes.`);
+      retryPreviewLater(id, 1);
+      return id;
+    }
+    if (!human && isTemporary(e)) {
+      office.failJob(id, `Failed while ${stage.now}: ${e.message}`);
+      await q(`UPDATE jobs SET status = 'render_failed', error = $2, attempts = attempts + 1, updated_at = now() WHERE id = $1`, [id, `${stage.now}: ${String(e.message ?? e)}`]);
+      await q(`UPDATE topics SET status = 'idea' WHERE id = $1`, [topic.id]); // no strike: the topic was not the problem
+      const next = retry < AUTO_RETRIES ? `Nothing to do: ${retryLater(retry)}.` : 'Nothing to do: it failed 3 times in a row, so the next scheduled run (07:00 or 15:00 UTC) tries again.';
+      await alert(`Job #${id} (${topic.question}) failed while ${stage.now}: ${e.message}\nThis is a temporary problem with an outside service, not the topic. ${next}`);
+      return id;
+    }
     office.failJob(id, `${human ? 'Needs a human look' : 'Failed'}: ${e.message}`);
     await q(`UPDATE jobs SET status = $2, error = $3, attempts = attempts + 1, updated_at = now() WHERE id = $1`, [id, human ? 'needs_human' : 'render_failed', String(e.message ?? e)]);
     const t = await one<{ fail_count: number }>(
       `UPDATE topics SET fail_count = fail_count + 1, status = CASE WHEN fail_count + 1 >= 3 THEN 'failed' ELSE 'idea' END, priority = priority - 1 WHERE id = $1 RETURNING fail_count`,
       [topic.id],
     );
-    await alert(`Job #${id} (${topic.question}) ${human ? 'needs a human look' : 'failed'}: ${e.message}${e.detail ? `\n${JSON.stringify(e.detail).slice(0, 600)}` : ''}${t && t.fail_count >= 3 ? '\nThe topic failed 3 times and was moved to dead letter.' : ''}`);
+    await alert(`Job #${id} (${topic.question}) ${human ? 'needs a human look' : `failed while ${stage.now}`}: ${e.message}${e.detail ? `\n${JSON.stringify(e.detail).slice(0, 600)}` : ''}${t && t.fail_count >= 3 ? '\nThe topic failed 3 times and was moved to dead letter.' : ''}`);
     return id;
   }
 }
 
-export async function renderAndPreview(id: number, reuseClips = false): Promise<void> {
+export async function renderAndPreview(id: number, reuseClips = false, stage = { now: '' }): Promise<void> {
+  stage.now = 'rendering the video';
   const job = (await one<JobRow>('SELECT * FROM jobs WHERE id = $1', [id]))!;
   const ds = await getDataset((await one<{ dataset_id: string }>('SELECT dataset_id FROM topics WHERE id = $1', [job.topic_id]))!.dataset_id);
   const dir = jobDir(id);
@@ -242,6 +288,7 @@ export async function renderAndPreview(id: number, reuseClips = false): Promise<
   }).catch((e) => { office.failJob(id, `Render failed: ${e.message}`); throw e; });
   office.finished('editor', `Rendered ${res.seconds.toFixed(1)} s of video`, id);
   office.working('checker', 'Checking format, loudness, dead air, numbers and speech', id);
+  stage.now = 'checking the video';
   const qa = await runQa({
     video: res.video,
     voiceTrack: path.join(dir, 'voice.wav'),
@@ -264,6 +311,7 @@ export async function renderAndPreview(id: number, reuseClips = false): Promise<
     await alert(`Job #${id} failed QA:\n${qaSummary(qa)}`);
     return;
   }
+  stage.now = 'sending the preview';
   await sendPreview(id);
 }
 
