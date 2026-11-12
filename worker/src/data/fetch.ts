@@ -23,14 +23,27 @@ async function cached(key: string, fetcher: () => Promise<string>): Promise<stri
     const st = await fs.stat(file);
     if (Date.now() - st.mtimeMs < CACHE_HOURS * 3600_000) return await fs.readFile(file, 'utf8');
   } catch { /* not cached */ }
-  const body = await fetcher();
+  let body: string;
+  try {
+    body = await fetcher();
+  } catch (e: any) {
+    // The source is down or too slow (the World Bank API sometimes hangs for minutes). An older copy
+    // of the same data is far better than no video: these figures change once a year at most.
+    if (e?.notFound) throw e;
+    const stale = await fs.readFile(file, 'utf8').catch(() => undefined);
+    if (stale === undefined) throw e;
+    console.warn(`[data] ${key}: ${e?.message ?? e}; using the older saved copy`);
+    return stale;
+  }
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(file, body);
   return body;
 }
 
-async function get(url: string, timeoutMs = 60_000): Promise<string> {
-  let lastErr: unknown;
+// Three tries, a minute and a half each. The error names the address, so a Telegram alert says
+// which source failed instead of a bare "The operation was aborted due to timeout".
+async function get(url: string, timeoutMs = 90_000): Promise<string> {
+  let lastErr: any;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(timeoutMs) });
@@ -40,10 +53,11 @@ async function get(url: string, timeoutMs = 60_000): Promise<string> {
     } catch (e: any) {
       if (e?.notFound) throw e;
       lastErr = e;
-      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 5000 * (attempt + 1)));
     }
   }
-  throw lastErr;
+  const host = new URL(url).host;
+  throw Object.assign(new Error(`${host} did not answer after 3 tries (${lastErr?.message ?? lastErr})`), { temporary: true, cause: lastErr });
 }
 
 export function parseCsv(text: string): string[][] {
