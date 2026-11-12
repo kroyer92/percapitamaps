@@ -12,6 +12,7 @@ export const CHANGES: Change[] = [
   { at: '2026-10-29T09:49:00Z', label: 'Map Reveal guess beat cut, #1 kept out of titles', formats: 'all' },
   { at: '2026-10-30T12:09:00Z', label: 'Map Reveal opening test (rank strip vs classic)', formats: ['MAP_REVEAL'] },
   { at: '2026-11-06T12:00:00Z', label: 'Per Capita Nation daily census (first version)', formats: ['NATION'] },
+  { at: '2026-11-12T12:00:00Z', label: 'One-text opening (headline is the spoken hook)', formats: ['COUNTDOWN', 'GUESS'] },
 ];
 
 const applies = (c: Change, format: string) => c.formats === 'all' || (c.formats as string[]).includes(format);

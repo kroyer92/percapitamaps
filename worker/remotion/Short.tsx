@@ -22,13 +22,19 @@ export const Short: React.FC<ShortProps> = (p) => {
   // The rank strip opening shows the hook's words itself, so the hook gets no headline or captions,
   // and the kicker waits under the strip until the hook is over.
   const strip = p.format === 'MAP_REVEAL' && !!p.opening;
-  const beats = strip ? p.beats.map((b, i) => (i === 0 ? { ...b, on_screen: '', words: [] } : b)) : p.beats;
+  // Countdown and Guess open with one text: the headline is the hook the voice says, each word
+  // lighting up as it is spoken. No question beside it, no caption under it, and the kicker waits
+  // until the hook is over. (The first frame used to carry three texts, about 15 to 20 words.)
+  const one = !strip && (p.format === 'COUNTDOWN' || p.format === 'GUESS') && !!p.beats[0]?.vo;
+  const hookEnd = p.beats[1]?.start ?? 60;
+  const beats = strip ? p.beats.map((b, i) => (i === 0 ? { ...b, on_screen: '', words: [] } : b))
+    : one ? p.beats.map((b, i) => (i === 0 ? { ...b, on_screen: b.vo, words: [] } : b)) : p.beats;
   return (
     <AbsoluteFill>
       <Background />
       <Visual p={p} />
-      {strip ? <Kicker text={p.kicker} top={STRIP.kicker} from={p.beats[1]?.start ?? 60} /> : <Kicker text={p.kicker} />}
-      <Headline beats={beats} low={strip} />
+      {strip ? <Kicker text={p.kicker} top={STRIP.kicker} from={hookEnd} /> : <Kicker text={p.kicker} from={one ? hookEnd : 0} />}
+      <Headline beats={beats} low={strip} spoken={one ? p.beats[0].words : undefined} />
       <Captions beats={beats} />
       <SourceLine text={p.sourceLine} from={sourceFrom(p)} handle={p.handle} />
       {strip && <RankStripOpening p={p} />}
