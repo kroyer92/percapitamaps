@@ -2,7 +2,7 @@
 // datasets, and writes every line from the data. No language model is involved, so no number can
 // be made up: every value said or shown comes from the facts builder, like in the Shorts.
 import { HIGH_END, type CatalogEntry } from '../data/catalog.js';
-import { fetchSeries } from '../data/fetch.js';
+import { fetchSeries, type Series } from '../data/fetch.js';
 import { countryName } from '../data/countries.js';
 import { buildFacts, formatValue, MIN_ABOVE_FLOOR, type Facts, type RankRow } from '../facts.js';
 import type { Beat } from '../validate.js';
@@ -45,12 +45,12 @@ export function spoken(r: Pick<RankRow, 'display'>, ds: Pick<Dataset, 'prefix' |
 const THE = /^(United |UAE$|Netherlands$|Philippines$|Bahamas$|Gambia$|Maldives$|Czech Republic$|Dominican Republic$|Central African Republic$|Solomon Islands$|Marshall Islands$|Comoros$|Seychelles$)/;
 export const inSentence = (name: string) => (THE.test(name) ? `the ${name}` : name);
 
-function lower(title: string): string {
+export function lower(title: string): string {
   // "GDP per person" keeps its capitals; "Average height of men" -> "average height of men".
   return /^[A-Z]{2}/.test(title) ? title : title.charAt(0).toLowerCase() + title.slice(1);
 }
 
-function namesList(names: string[]): string {
+export function namesList(names: string[]): string {
   return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
@@ -73,7 +73,8 @@ export function unusable(ds: Dataset, facts: Facts): string | undefined {
 }
 
 // Facts for one dataset, plus who led ten years before the latest year, among the same countries.
-export async function segmentFacts(ds: Dataset): Promise<{ facts: Facts; earlier?: { year: number; leader: string; leaderIso: string; display: string } }> {
+// The series comes along too: the game's then-and-now rounds read earlier years from it.
+export async function segmentFacts(ds: Dataset): Promise<{ facts: Facts; series: Series; earlier?: { year: number; leader: string; leaderIso: string; display: string } }> {
   const [series, population] = await Promise.all([fetchSeries(ds.ref), fetchSeries({ kind: 'worldbank', indicator: 'SP.POP.TOTL' })]);
   const facts = buildFacts({ ds, series, population, format: 'MAP_REVEAL' });
   const year = facts.year - 10;
@@ -82,9 +83,9 @@ export async function segmentFacts(ds: Dataset): Promise<{ facts: Facts; earlier
     .filter((r): r is { iso: string; v: number } => r.v !== undefined && isFinite(r.v))
     .sort((a, b) => b.v - a.v);
   // Only when nearly the same countries had data then; otherwise "the leader" would mean little.
-  if (then.length < facts.countries_count * 0.85 || !then.length || then[0].v === then[1]?.v) return { facts };
+  if (then.length < facts.countries_count * 0.85 || !then.length || then[0].v === then[1]?.v) return { facts, series };
   const top = then[0];
-  return { facts, earlier: { year, leader: countryName(top.iso, series.names.get(top.iso)), leaderIso: top.iso, display: formatValue(top.v, ds) } };
+  return { facts, series, earlier: { year, leader: countryName(top.iso, series.names.get(top.iso)), leaderIso: top.iso, display: formatValue(top.v, ds) } };
 }
 
 // The lines of one map. Variants rotate with the map's number, so ten maps don't all sound alike.
@@ -192,7 +193,7 @@ export function segmentBeats(n: number, total: number, ds: Dataset, facts: Facts
   return { beats, extraIsos: [...new Set(extraIsos)] };
 }
 
-function cap(s: string): string {
+export function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
@@ -231,6 +232,43 @@ export function orderDatasets(theme: Theme, viewsByDataset: Map<string, number>)
     .map((x) => x.id);
 }
 
+export interface PickedMap { ds: Dataset; facts: Facts; series: Series; earlier?: Awaited<ReturnType<typeof segmentFacts>>['earlier'] }
+
+// Loads the theme's datasets in order and keeps the first `want` that can carry a map. Shared by
+// the classic long-form and the game (game.ts).
+export async function pickMaps(opts: {
+  theme: Theme;
+  viewsByDataset: Map<string, number>;
+  lookup: (id: string) => Promise<Dataset | undefined>; // undefined = disabled or unknown
+  want: number;
+  min: number;
+  onStep?: (s: string) => void;
+  skip?: (p: PickedMap) => string | undefined; // a style's own reason to leave a map out (game.ts)
+}): Promise<{ picked: PickedMap[]; skipped: string[] }> {
+  const picked: PickedMap[] = [];
+  const skipped: string[] = [];
+  const groups = new Map<string, number>();
+  for (const id of orderDatasets(opts.theme, opts.viewsByDataset)) {
+    if (picked.length >= opts.want) break;
+    const ds = await opts.lookup(id);
+    if (!ds) { skipped.push(`${id}: disabled or not in the catalog`); continue; }
+    const g = ds.grp ?? ds.id;
+    if ((groups.get(g) ?? 0) >= 2) { skipped.push(`${id}: two maps from "${g}" already`); continue; }
+    opts.onStep?.(`Loading ${ds.title}`);
+    try {
+      const { facts, series, earlier } = await segmentFacts(ds);
+      const why = unusable(ds, facts) ?? opts.skip?.({ ds, facts, series, earlier });
+      if (why) { skipped.push(`${id}: ${why}`); continue; }
+      picked.push({ ds, facts, series, earlier });
+      groups.set(g, (groups.get(g) ?? 0) + 1);
+    } catch (e: any) {
+      skipped.push(`${id}: ${String(e.message ?? e).slice(0, 120)}`);
+    }
+  }
+  if (picked.length < opts.min) throw new TooFewMapsError(`Only ${picked.length} usable maps for "${opts.theme.name}" (need ${opts.min}). ${skipped.join('; ')}`);
+  return { picked, skipped };
+}
+
 export async function planLongform(opts: {
   theme: Theme;
   viewsByDataset: Map<string, number>;
@@ -239,27 +277,7 @@ export async function planLongform(opts: {
   onStep?: (s: string) => void;
 }): Promise<LongPlan> {
   const want = Math.max(MIN_MAPS, Math.min(MAX_MAPS, opts.maps ?? MAX_MAPS));
-  const picked: { ds: Dataset; facts: Facts; earlier?: Awaited<ReturnType<typeof segmentFacts>>['earlier'] }[] = [];
-  const skipped: string[] = [];
-  const groups = new Map<string, number>();
-  for (const id of orderDatasets(opts.theme, opts.viewsByDataset)) {
-    if (picked.length >= want) break;
-    const ds = await opts.lookup(id);
-    if (!ds) { skipped.push(`${id}: disabled or not in the catalog`); continue; }
-    const g = ds.grp ?? ds.id;
-    if ((groups.get(g) ?? 0) >= 2) { skipped.push(`${id}: two maps from "${g}" already`); continue; }
-    opts.onStep?.(`Loading ${ds.title}`);
-    try {
-      const { facts, earlier } = await segmentFacts(ds);
-      const why = unusable(ds, facts);
-      if (why) { skipped.push(`${id}: ${why}`); continue; }
-      picked.push({ ds, facts, earlier });
-      groups.set(g, (groups.get(g) ?? 0) + 1);
-    } catch (e: any) {
-      skipped.push(`${id}: ${String(e.message ?? e).slice(0, 120)}`);
-    }
-  }
-  if (picked.length < MIN_MAPS) throw new TooFewMapsError(`Only ${picked.length} usable maps for "${opts.theme.name}" (need ${MIN_MAPS}). ${skipped.join('; ')}`);
+  const { picked, skipped } = await pickMaps({ ...opts, want, min: MIN_MAPS });
 
   const total = picked.length;
   const segments: PlannedSegment[] = picked.map((p, i) => {

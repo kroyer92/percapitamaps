@@ -15,6 +15,7 @@ import path from 'node:path';
 import type { Beat } from './validate.js';
 import type { VoiceClip } from './voice.js';
 import * as office from './activity.js';
+import { longformDue, longformExport, longformReport, storeLongformSnapshot } from './longform/score.js';
 
 const WINDOWS: { win: string; hours: number }[] = [
   { win: '24h', hours: 24 },
@@ -42,6 +43,8 @@ export const PROVISIONAL_SQL = `COALESCE(m.score->>'provisional', '') = 'true'`;
 
 export async function dueSnapshots() {
   await nagUnlinked().catch((e) => console.error('[nag]', e.message));
+  // The weekly long-forms come first (job "L<n>", longform/score.ts): there are only a few.
+  const longs = await longformDue().catch((e): [] => { console.error('[longform due]', e.message); return []; });
   const jobs = await q<{ id: number; youtube_video_id: string; published_at: Date }>(
     `SELECT id, youtube_video_id, published_at FROM jobs WHERE youtube_video_id IS NOT NULL AND published_at IS NOT NULL AND published_at > now() - interval '30 days'`);
   const have = new Map((await q<{ job_id: number; win: string; ready: boolean; captured_at: Date }>(
@@ -63,7 +66,7 @@ export async function dueSnapshots() {
       }
     }
   }
-  return out.slice(0, 40);
+  return [...longs, ...out].slice(0, 40);
 }
 
 // Approved videos whose slot has passed without a /link get no scorecard or Instagram post, so the
@@ -96,6 +99,25 @@ export async function storeSnapshot(body: any): Promise<void> {
   const stats = body.stats?.items?.[0]?.statistics ?? body.stats ?? {};
   const a = analyticsRow(body.analytics);
   const num = (v: any) => (v === undefined || v === null || isNaN(Number(v)) ? null : Number(v));
+  // A weekly long-form ("L<n>"): its scorecard is told only once the window has settled, which is
+  // always days after the window ended, so Analytics' numbers (ending on the window's last day) lead.
+  const long = /^L(\d+)$/i.exec(String(body.job_id ?? ''));
+  if (long) {
+    office.working('analyst', `Reading the ${body.win} numbers for long-form #${long[1]}`);
+    await storeLongformSnapshot({
+      n: Number(long[1]), win: String(body.win), body, ytPublished: body.stats?.items?.[0]?.snippet?.publishedAt,
+      views: num(a.views) ?? num(stats.viewCount),
+      avg_view_pct: num(a.averageViewPercentage),
+      avg_view_sec: num(a.averageViewDuration),
+      likes: num(a.likes) ?? num(stats.likeCount),
+      shares: num(a.shares),
+      comments: num(a.comments) ?? num(stats.commentCount),
+      subs_gained: num(a.subscribersGained),
+      curve: curveRows(body.curve),
+    });
+    office.finished('analyst', `Long-form #${long[1]}: ${body.win} numbers stored`);
+    return;
+  }
   const jobId = Number(body.job_id);
   // videos.list statistics are lifetime totals; for a snapshot taken well after its window the
   // Analytics row (which ends on the window's last day) is the honest number.
@@ -417,6 +439,10 @@ async function weeklyReportInner(): Promise<string> {
   const verdictLine = verdicts.map((v) => `${v.verdict} ${v.n}`).join(' · ') || 'none scored yet';
   const tuneLines = await autoTune().catch((e) => [`Auto-tuning failed: ${esc(String(e.message ?? e))}`]);
   const opening = await openingTest().catch((e): undefined => { console.error('[opening]', e.message); return undefined; });
+  const long = await longformReport().catch((e): { lines: string[]; move?: string; keyboard?: Keyboard } => {
+    console.error('[longform report]', e.message);
+    return { lines: ['Could not read the long-form numbers this week; they are read again next Sunday.'] };
+  });
 
   // Winners whose follow-ups haven't been made yet get them now (normally the scorecard already did).
   const winners = rows.filter((r) => r.score?.verdict === 'winner');
@@ -447,6 +473,7 @@ async function weeklyReportInner(): Promise<string> {
   if (linkLines.length) yours.push(`Link ${linkLines.length === 1 ? 'this upload' : 'these uploads'} so I can measure ${linkLines.length === 1 ? 'it' : 'them'}:\n${linkLines.join('\n')}`);
   if (opening?.apply) yours.push(`Tap "Use ${OPENING_LABEL[opening.apply]} only" below (Map Reveal opening test has a verdict).`);
   if (call.kind === 'change') yours.push('Forward this report to Claude in the project chat (see "Channel call").');
+  if (long.move) yours.push(long.move);
   const done = [
     queued.length ? `Queued 2 follow-ups each for winner${queued.length === 1 ? '' : 's'} ${queued.map((i) => `#${i}`).join(', ')}.` : '',
     winners.length && !queued.length ? `Winner${winners.length === 1 ? '' : 's'} ${winners.map((w) => `#${w.id}`).join(', ')} already ${winners.length === 1 ? 'has its' : 'have their'} follow-ups.` : '',
@@ -475,6 +502,7 @@ async function weeklyReportInner(): Promise<string> {
     '', '<b>Channel call</b>', esc(call.text),
     ...(versionLines.length ? ['', '<b>By version</b> (all videos of the last 90 days, at 72 h or 7 d)', ...versionLines] : []),
     '', '<b>Map Reveal opening test</b> (stayed at 72 h)', ...(opening?.lines ?? ['Could not read the test this week; it is retried next Sunday.']).map(esc),
+    '', '<b>Weekly long video</b> (🎮 game style, 🗺 classic)', ...long.lines,
     '', '<b>Top 5</b>', ...sorted.slice(0, 5).map(line),
     ...(sorted.length > 5 ? ['', '<b>Bottom 5</b>', ...sorted.slice(-5).reverse().map(line)] : []),
     '', '<b>By format</b>', group('format'),
@@ -486,7 +514,8 @@ async function weeklyReportInner(): Promise<string> {
     '', '<b>Auto-tuning</b> (done automatically)', ...tuneLines,
     '', '<i>🏆 = top 20% by views.</i>',
   ].filter((l) => l !== undefined).join('\n');
-  await say(text, opening ? openingKeyboard(opening) : undefined);
+  const keyboard: Keyboard = [...((opening && openingKeyboard(opening)) || []), ...(long.keyboard ?? [])];
+  await say(text, keyboard.length ? keyboard : undefined);
   await writeExport().catch((e) => console.error('[export]', e.message));
   return text;
 }
@@ -511,7 +540,8 @@ export async function writeExport(): Promise<void> {
      GROUP BY j.id ORDER BY j.id`);
   await fs.mkdir(dir, { recursive: true });
   const file = path.join(dir, `${config.analysisExportToken}.json`);
-  await fs.writeFile(file, JSON.stringify({ generated_at: new Date().toISOString(), channel: config.channelName, tune: await getTune(), videos: rows }, null, 1));
+  const longforms = await longformExport().catch((e) => { console.error('[export longforms]', e.message); return []; });
+  await fs.writeFile(file, JSON.stringify({ generated_at: new Date().toISOString(), channel: config.channelName, tune: await getTune(), videos: rows, longforms }, null, 1));
 }
 
 // WF5's channel totals for the studio's YPP wall: subscriber count (Data API), Shorts views per day

@@ -6,6 +6,7 @@ export interface Theme {
   key: string;
   name: string; // shown on the thumbnail and the intro card, e.g. "MONEY"
   titles: string[]; // YouTube title options, no country named (the answers stay a surprise)
+  quiz: string[]; // the same for the game-style video, written for 10 rounds
   intro: string; // the first thing the voice says
   question: string; // pinned comment
   tags: string[];
@@ -16,6 +17,7 @@ export const THEMES: Theme[] = [
   {
     key: 'money', name: 'Money',
     titles: ['Where Your Money Goes Furthest: 10 Maps of the World’s Money', '10 Maps That Show Who Is Really Rich', 'The World’s Money in 10 Maps'],
+    quiz: ['Can You Guess the World’s Richest Countries? 10-Round Map Quiz', 'Money Map Quiz: 10 Rounds Against the Clock', 'Guess the Country: 10 Maps of the World’s Money'],
     intro: 'Ten maps of money. Who earns the most, where prices are lowest, and where your money goes furthest.',
     question: 'Which of these 10 maps surprised you most?',
     tags: ['world maps', 'money', 'richest countries', 'cost of living by country', 'gdp per capita', 'data visualization', 'geography'],
@@ -24,6 +26,7 @@ export const THEMES: Theme[] = [
   {
     key: 'health', name: 'Health',
     titles: ['Who Lives Longest? 10 Maps of the World’s Health', '10 Maps That Show How Healthy the World Really Is', 'The World’s Health in 10 Maps'],
+    quiz: ['Can You Guess Who Lives Longest? 10-Round Map Quiz', 'Health Map Quiz: 10 Rounds Against the Clock', 'Guess the Country: 10 Maps of the World’s Health'],
     intro: 'Ten maps of health. Who lives longest, who smokes and drinks the most, and who has the most doctors.',
     question: 'Which of these 10 maps surprised you most?',
     tags: ['world maps', 'health', 'life expectancy by country', 'longest living countries', 'data visualization', 'geography'],
@@ -32,6 +35,7 @@ export const THEMES: Theme[] = [
   {
     key: 'food', name: 'Food',
     titles: ['What the World Eats: 10 Maps of Food', '10 Maps That Show Who Eats the Most', 'The World’s Diet in 10 Maps'],
+    quiz: ['Can You Guess Who Eats the Most? 10-Round Map Quiz', 'Food Map Quiz: 10 Rounds Against the Clock', 'Guess the Country: 10 Maps of What the World Eats'],
     intro: 'Ten maps of food. Who eats the most meat, drinks the most coffee, and eats the most calories.',
     question: 'Which of these 10 maps surprised you most?',
     tags: ['world maps', 'food', 'meat consumption by country', 'coffee consumption', 'data visualization', 'geography'],
@@ -40,6 +44,7 @@ export const THEMES: Theme[] = [
   {
     key: 'work', name: 'Work',
     titles: ['Who Works the Most? 10 Maps of the World’s Jobs', '10 Maps That Show How the World Works', 'The World’s Work in 10 Maps'],
+    quiz: ['Can You Guess Who Works the Most? 10-Round Map Quiz', 'Work Map Quiz: 10 Rounds Against the Clock', 'Guess the Country: 10 Maps of How the World Works'],
     intro: 'Ten maps of work. Who works the longest hours, who gets the most done per hour, and where jobs are hardest to find.',
     question: 'Which of these 10 maps surprised you most?',
     tags: ['world maps', 'work', 'working hours by country', 'productivity', 'unemployment', 'data visualization', 'geography'],
@@ -48,6 +53,7 @@ export const THEMES: Theme[] = [
   {
     key: 'people', name: 'People',
     titles: ['The World’s People in 10 Maps', '10 Maps That Show Who We Really Are', 'Tallest, Oldest, Most Educated: 10 Maps of People'],
+    quiz: ['Can You Guess the Tallest and Oldest Countries? 10-Round Map Quiz', 'People Map Quiz: 10 Rounds Against the Clock', 'Guess the Country: 10 Maps of the World’s People'],
     intro: 'Ten maps of people. Who is tallest, who is oldest, and who stays in school the longest.',
     question: 'Which of these 10 maps surprised you most?',
     tags: ['world maps', 'population', 'tallest countries', 'median age by country', 'data visualization', 'geography'],
@@ -56,6 +62,7 @@ export const THEMES: Theme[] = [
   {
     key: 'energy', name: 'Energy',
     titles: ['Who Uses the Most Energy? 10 Maps of Power and Pollution', '10 Maps That Show Where the World’s Energy Goes', 'The World’s Energy in 10 Maps'],
+    quiz: ['Can You Guess Who Uses the Most Energy? 10-Round Map Quiz', 'Energy Map Quiz: 10 Rounds Against the Clock', 'Guess the Country: 10 Maps of Power and Pollution'],
     intro: 'Ten maps of energy. Who uses the most, who pollutes the most, and who runs on sun and wind.',
     question: 'Which of these 10 maps surprised you most?',
     tags: ['world maps', 'energy', 'co2 emissions per capita', 'renewable energy by country', 'data visualization', 'geography'],
@@ -64,6 +71,7 @@ export const THEMES: Theme[] = [
   {
     key: 'tech', name: 'Tech',
     titles: ['Who Is Most Online? 10 Maps of the World’s Tech', '10 Maps That Show the World’s Tech Race', 'The World’s Technology in 10 Maps'],
+    quiz: ['Can You Guess the Most Online Countries? 10-Round Map Quiz', 'Tech Map Quiz: 10 Rounds Against the Clock', 'Guess the Country: 10 Maps of the World’s Tech'],
     intro: 'Ten maps of technology. Who is most online, who invents the most, and who drives electric.',
     question: 'Which of these 10 maps surprised you most?',
     tags: ['world maps', 'technology', 'internet use by country', 'electric cars', 'patents', 'data visualization', 'geography'],
@@ -72,6 +80,7 @@ export const THEMES: Theme[] = [
   {
     key: 'nature', name: 'Nature',
     titles: ['More Cows Than People? 10 Maps of Land and Nature', '10 Maps That Show the World’s Land, Water and Animals', 'The World’s Nature in 10 Maps'],
+    quiz: ['More Cows Than People? 10-Round Map Quiz of Land and Nature', 'Nature Map Quiz: 10 Rounds Against the Clock', 'Guess the Country: 10 Maps of Land, Water and Animals'],
     intro: 'Ten maps of land and nature. Who has the most forest, the most water, and more animals than people.',
     question: 'Which of these 10 maps surprised you most?',
     tags: ['world maps', 'nature', 'forest by country', 'livestock per person', 'data visualization', 'geography'],
