@@ -38,7 +38,7 @@ n8n (schedules, YouTube credentials)          render-worker (this repo, worker/)
 | Queue the 10 launch concepts | `docker compose exec -T postgres psql -U percapita -d percapita < app/sql/seed_launch_concepts.sql` |
 | One test video | `docker compose exec render-worker npm run test-render -- --concept cattle` |
 | Voice samples | `docker compose exec render-worker npm run voice-test` |
-| Long-form script only (no render) | `docker compose exec render-worker npm run longform -- --plan --theme money` |
+| Long-form script only (no render) | `docker compose exec render-worker npm run longform -- --plan --theme money` (the map quiz; add `--classic` for the classic one) |
 | Long-form thumbnail again | `docker compose exec render-worker npm run thumb -- --longform 1` |
 | Re-check datasets | `docker compose exec render-worker npm run check-datasets` |
 | Import n8n workflows | `docker compose exec n8n n8n import:workflow --separate --input=/import/workflows` |
@@ -158,16 +158,34 @@ citizen; today's episode is made again without them).
 ## Telegram
 
 Buttons on each preview: Approve, Reject, Hook 1–5. Commands: `/status`, `/produce [n]`,
-`/link <job> <url>`, `/followup <job or url>`, `/tune [on|off|reset]`, `/opening`, `/longform [theme]`, `/nation`, `/help`.
+`/link <job> <url>`, `/followup <job or url>`, `/tune [on|off|reset]`, `/opening`, `/longform [theme] [game|classic]`, `/nation`, `/help`.
 
 ## Weekly long-form video
 
-`worker/src/longform/`: one 16:9 video a week, 8 to 10 maps on one theme (money, health, food, work,
-people, energy, tech, nature; `themes.ts`). The theme is the one whose datasets earned the Shorts the
-most views, skipping the last four themes used. Every line is written by code from the facts builder,
-so no number can be made up: per map a title card, the world in blue, ranks 10 to 6, then 5 to 2,
-the #1 in amber, then extra facts (an anchor country, China and India, who led ten years earlier, the
-bottom). Intro, chapters, an "every #1" recap, and a thumbnail (`remotion/Longform.tsx`, `Thumb.tsx`).
+`worker/src/longform/`: one 16:9 video a week on one theme (money, health, food, work, people,
+energy, tech, nature; `themes.ts`). The theme is the one whose datasets earned the Shorts the most
+views, skipping the last four themes used. Every line is written by code from the facts builder, so
+no number can be made up. It comes in two styles:
+
+- **Map quiz** (the default since Nov 2026; `game.ts`, `game-time.ts`, `remotion/Game.tsx`): about 9
+  rounds of 35 to 45 seconds, one map each. A cold open teases the biggest surprises without naming an
+  answer (America not in the top 5, "in 1960, 74 countries were under 50 years"), says how many
+  countries are in the top ten on most maps, and gives the rules. Each round asks a question the
+  viewer answers before a 4-second timer runs out: pick the #1 of three, then and now (how many
+  countries are under a line today), how many are above a line, or higher or lower than a famous
+  country. Then the answer lands with a "+1" for the viewer's score, the top five, the viewer's own
+  country (US, UK, Canada, Australia, India, Germany), and one closing comparison. It ends on the
+  country in the top ten on the most maps and "comment your score". Sound effects (tick, timer
+  clock, riser and hit on each answer) are placed on the same frames as the picture. A map whose top
+  value several countries share (100%) is left out: it has no #1 to guess.
+- **Classic** (`plan.ts`, `remotion/Longform.tsx`): 8 to 10 maps, each counted down from #10 to the
+  #1 in amber, with extra facts and an "every #1" recap.
+
+If the map quiz fails, the same run makes the classic one instead and says so in Telegram, so the
+weekly video still comes. `/longform [theme] [game|classic]` makes one now (the style word picks the
+style for that one video); `LONGFORM_ROUNDS` sets the quiz's rounds (7 to 12, default 9) and
+`LONGFORM_STYLE=classic` the default style. Both have chapters and a thumbnail (`Thumb.tsx`: the quiz
+one asks "GET 9/9?" and shows no answer).
 
 It runs by itself on Saturday from 21:00 (LOCAL_TZ) in the same work lane as the Shorts, takes about
 an hour, and arrives in Telegram with the thumbnail, a link to watch it, and Approve/Reject. With
@@ -176,8 +194,18 @@ an hour, and arrives in Telegram with the thumbnail, a link to watch it, and App
 if YouTube refuses the thumbnail, Telegram says how to add it by hand), adds it to `PLAYLIST_LONGFORM`
 if set, and reports back, which links it. Telegram then lists the Shorts whose "Related video" could
 point to it (not in YouTube's API, so optional). With uploads off, Approve sends the steps to upload by
-hand and `/link L1 <url>` records it. `/longform [theme]` makes one now. `LONGFORM_AUTO=off` in `app/.env` stops the weekly run. Files: `renders/longform-N.mp4`, a
+hand and `/link L1 <url>` records it. `LONGFORM_AUTO=off` in `app/.env` stops the weekly run. Files: `renders/longform-N.mp4`, a
 download copy under `public/longform/` (deleted after 14 days; renders after 30).
+
+**Its own scorecard** (`longform/score.ts`): WF5 measures each long-form as job `L<n>` at 72 hours,
+7 days and 28 days after it goes public (the due list puts them first; n8n passes the id through
+unchanged). Once a window has settled (3 days after it, as Analytics lags), Telegram gets: still
+watching at 0:30 (target 60%), how much of the video an average view covers (target 30%), watch
+hours, and the chapter that loses viewers fastest, with a **Your move** line. No single video changes
+anything: the Sunday report has a "Weekly long video" section, and once 3 quiz videos have 7-day
+numbers it compares them with the classic ones. Only if the classic kept viewers clearly better (5
+points on both numbers) does it offer a button, "Use the classic long-form", which switches the style.
+Rows are in `longform_metrics`; the analysis export lists them under `longforms`.
 
 ## Automatic analysis
 

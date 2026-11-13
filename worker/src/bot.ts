@@ -11,6 +11,7 @@ import { fmtIn } from './lib/time.js';
 import { setTune } from './tune.js';
 import { approveLongform, linkLongform, makeLongform, rejectLongform } from './longform/make.js';
 import { THEMES } from './longform/themes.js';
+import { setLongformStyle, type LongStyle } from './longform/score.js';
 import { nationCommand } from './nation/make.js';
 import { applyOpening, openingKeyboard, openingTest, videosOverview } from './analytics.js';
 
@@ -19,7 +20,7 @@ const HELP = [
   'Buttons on each preview: ✅ Approve, ❌ Reject, Hook 1–5 (re-render with that opening line).',
   '',
   '/link &lt;job&gt; &lt;url&gt; – connect an uploaded video to its job (long-form: /link L1 &lt;url&gt;)',
-  '/longform [theme] – make the long-form video now (it also runs by itself every Saturday evening)',
+  '/longform [theme] [game|classic] – make the long-form video now (it also runs by itself every Saturday evening; game or classic picks the style for this one)',
   '/followup &lt;job or video URL&gt; – queue 2 related videos (winners get theirs automatically)',
   '/produce [n] – make n videos now (default 1)',
   '/videos – every recent video, its link and its scorecards',
@@ -69,9 +70,11 @@ async function onMessage(text: string): Promise<void> {
       return;
     }
     case '/longform': {
-      const theme = (args[0] ?? '').toLowerCase();
-      if (theme && !THEMES.some((t) => t.key === theme)) { await say(`Themes: ${THEMES.map((t) => t.key).join(', ')}. Or just /longform and the Shorts' views pick one.`); return; }
-      const ahead = queue.add('long-form video', async () => { await makeLongform({ theme: theme || undefined }); });
+      const words = args.map((a) => a.toLowerCase());
+      const style = words.find((w): w is LongStyle => w === 'game' || w === 'classic');
+      const theme = words.find((w) => w !== style) ?? '';
+      if (theme && !THEMES.some((t) => t.key === theme)) { await say(`Themes: ${THEMES.map((t) => t.key).join(', ')}. Or just /longform and the Shorts' views pick one. Add game or classic to pick the style for this one.`); return; }
+      const ahead = queue.add('long-form video', async () => { await makeLongform({ theme: theme || undefined, style }); });
       await say(`🎞 Long-form queued${ahead > 1 ? ` behind ${ahead - 1} other job${ahead > 2 ? 's' : ''}` : ''}. It takes about an hour; it arrives here when it's done.`);
       return;
     }
@@ -121,6 +124,11 @@ async function onCallback(cb: any): Promise<void> {
   if (kind === 'op' && (arg === 'rank_strip' || arg === 'classic')) {
     await tg('editMessageReplyMarkup', { chat_id: config.telegramChatId, message_id: cb.message?.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
     await say(await applyOpening(arg));
+    return;
+  }
+  if (kind === 'ls' && (arg === 'game' || arg === 'classic')) {
+    await tg('editMessageReplyMarkup', { chat_id: config.telegramChatId, message_id: cb.message?.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+    await say(await setLongformStyle(arg));
     return;
   }
   if (kind === 'la' || kind === 'lr') {

@@ -143,6 +143,26 @@ CREATE TABLE IF NOT EXISTS longforms (
 ALTER TABLE longforms ADD COLUMN IF NOT EXISTS upload_tries int NOT NULL DEFAULT 0;  -- times sent to WF3
 ALTER TABLE longforms ADD COLUMN IF NOT EXISTS publish_at timestamptz;              -- the slot it goes public
 ALTER TABLE longforms ADD COLUMN IF NOT EXISTS related_sent boolean NOT NULL DEFAULT false;  -- Related video list sent
+ALTER TABLE longforms ADD COLUMN IF NOT EXISTS style text NOT NULL DEFAULT 'classic';  -- game | classic (longform/score.ts)
+
+-- The long-form's own scorecard (worker/src/longform/score.ts). WF5 measures it as job "L<n>" at
+-- 72 hours, 7 days and 28 days after it goes public.
+CREATE TABLE IF NOT EXISTS longform_metrics (
+  n            int NOT NULL REFERENCES longforms(n),
+  win          text NOT NULL,                    -- 72h | 7d | 28d
+  captured_at  timestamptz NOT NULL DEFAULT now(),
+  views        int,
+  avg_view_pct numeric,
+  avg_view_sec numeric,
+  likes        int,
+  shares       int,
+  comments     int,
+  subs_gained  int,
+  raw          jsonb,
+  curve        jsonb,                            -- [[share of the video, viewers there per view], ...]
+  score        jsonb,                            -- LongScore; provisional until Analytics has caught up
+  PRIMARY KEY (n, win)
+);
 
 -- Per Capita Nation (worker/src/nation): viewers join on the passport page and become numbered
 -- citizens; a daily census Short shows the nation's size and ranks. Only the name a viewer types

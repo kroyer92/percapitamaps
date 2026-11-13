@@ -32,5 +32,6 @@ export interface ThumbProps {
   line2: string; // "OF MONEY"
   line3: string; // "WHO'S #1?"
   map: Record<string, number>;
-  answerIso?: string;
+  answerIso?: string; // the classic video: the first map's #1 in amber
+  quiz?: boolean; // the game: no answer on the map, a big question mark instead
 }

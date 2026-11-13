@@ -21,7 +21,12 @@ import * as office from '../activity.js';
 import type { Beat } from '../validate.js';
 import type { RankItem } from '../../remotion/types.js';
 import type { LongBeat, LongformProps, LongSegment, ThumbProps } from '../../remotion/longform-types.js';
-import { rankThemes, planLongform, TooFewMapsError, type Dataset, type LongPlan } from './plan.js';
+import type { GameProps } from '../../remotion/game-types.js';
+import { mixSfx } from '../sfx.js';
+import { pickMaps, rankThemes, planLongform, TooFewMapsError, type Dataset, type LongPlan } from './plan.js';
+import { GAME_MIN_ROUNDS, gameLines, gameUnusable, planGame, roundsWanted } from './game.js';
+import { gamePackaging, gameProps, gameScript, gameThumbProps, timeGame } from './game-time.js';
+import { longformStyle, type LongStyle } from './score.js';
 import { THEMES, themeByKey, type Theme } from './themes.js';
 
 // Pauses (seconds) that give the long video room to breathe: the Shorts run tighter.
@@ -154,10 +159,11 @@ async function serveUrl(): Promise<string> {
   }
 }
 
-export async function renderLongVideo(props: LongformProps, outFile: string, onProgress?: (p: number) => void): Promise<void> {
+// id: 'Longform' (the classic) or 'LongformGame' (the map quiz, remotion/Game.tsx).
+export async function renderLongVideo(props: LongformProps | GameProps, outFile: string, onProgress?: (p: number) => void, id = 'Longform'): Promise<void> {
   const url = await serveUrl();
   const browserExecutable = process.env.REMOTION_BROWSER || null;
-  const composition = await selectComposition({ serveUrl: url, id: 'Longform', inputProps: props as any, browserExecutable });
+  const composition = await selectComposition({ serveUrl: url, id, inputProps: props as any, browserExecutable });
   await renderMedia({
     composition, serveUrl: url, codec: 'h264', crf: 20, pixelFormat: 'yuv420p', muted: true, outputLocation: outFile,
     inputProps: props as any, concurrency: config.renderThreads, browserExecutable,
@@ -203,7 +209,29 @@ export function longDir(n: number) { return path.join(config.rendersDir, 'longfo
 export function longVideo(n: number) { return path.join(config.rendersDir, `longform-${n}.mp4`); }
 export function longThumb(n: number) { return path.join(config.rendersDir, `longform-${n}-thumb.png`); }
 
-export async function makeLongform(opts: { theme?: string; maps?: number } = {}): Promise<number | undefined> {
+// What one style's builder hands back: the finished video and thumbnail are at longVideo(n) and
+// longThumb(n); the rest goes into the database and the Telegram preview.
+interface Made {
+  theme: Theme;
+  seconds: number;
+  chapters: { at: number; label: string }[];
+  packaging: { title: string; title_options: string[]; description: string; tags: string[]; pinned_comment: string };
+  datasets: string[];
+  head: string; // "10 maps", "map quiz, 9 rounds"
+  lines: string[]; // HTML lines for the preview
+}
+
+interface LongJob {
+  n: number;
+  dir: string;
+  candidates: Theme[];
+  views: Map<string, number>;
+  opts: { theme?: string; maps?: number };
+  step: (s: string) => void;
+  told: Set<string>; // themes already announced (the classic fallback doesn't repeat it)
+}
+
+export async function makeLongform(opts: { theme?: string; maps?: number; style?: LongStyle } = {}): Promise<number | undefined> {
   const views = await viewsByDataset();
   // Only long-forms that were actually made count as "used": a rejected or failed one doesn't use
   // up its theme.
@@ -214,68 +242,30 @@ export async function makeLongform(opts: { theme?: string; maps?: number } = {})
     if (!t) { await say(`No theme called "${esc(opts.theme)}". Themes: ${THEMES.map((x) => x.key).join(', ')}`); return undefined; }
     candidates = [t];
   } else candidates = rankThemes(views, recent);
-  let theme = candidates[0];
-  const row = await one<{ n: number }>(`INSERT INTO longforms (theme) VALUES ($1) RETURNING n`, [theme.key]);
+  // The map quiz unless the Sunday report's button (or LONGFORM_STYLE) chose the classic one.
+  const style = opts.style ?? await longformStyle();
+  const row = await one<{ n: number }>(`INSERT INTO longforms (theme, style) VALUES ($1, $2) RETURNING n`, [candidates[0].key, style]);
   const n = row!.n;
   const dir = longDir(n);
   const step = (s: string) => { console.log(`[longform ${n}] ${s}`); office.working('editor', `Long-form #${n}: ${s}`); };
-  await say(`🎞 Making long-form #${n}. About an hour; it arrives here when it's done.`);
+  await say(`🎞 Making long-form #${n}${style === 'game' ? ' as a map quiz' : ''}. About an hour; it arrives here when it's done.`);
   try {
     await fs.mkdir(dir, { recursive: true });
-    // A theme with too few good maps is skipped for the next best one, so the weekly video still
-    // gets made. A theme Niko asked for by name is not swapped.
-    let plan: LongPlan | undefined;
-    const tooFew: string[] = [];
-    for (const t of candidates) {
-      step(`picking the maps for ${t.name}`);
+    const job: LongJob = { n, dir, candidates, views, opts, step, told: new Set() };
+    let made: Made | undefined;
+    if (style === 'game') {
       try {
-        plan = await planLongform({ theme: t, viewsByDataset: views, lookup, maps: opts.maps, onStep: step });
-        theme = t;
-        break;
-      } catch (e) {
-        if (!(e instanceof TooFewMapsError) || candidates.length === 1) throw e;
-        tooFew.push(t.name);
-        step(String((e as Error).message).slice(0, 200));
+        made = await makeGame(job);
+      } catch (e: any) {
+        // Too few maps for a quiz is too few for the classic one as well: it needs more.
+        if (e instanceof TooFewMapsError) throw e;
+        // The weekly video must still come, so a quiz that fails becomes a classic long-form.
+        console.error(`[longform ${n}] the map quiz failed:`, e);
+        await q(`UPDATE longforms SET style = 'classic', updated_at = now() WHERE n = $1`, [n]);
+        await say(`⚠️ The map quiz for long-form #${n} failed: ${esc(String(e.message ?? e).slice(0, 400))}\nI'm making the classic long-form instead, so this week's video still comes. Nothing for you to do; I'll look at the quiz.`);
       }
     }
-    if (!plan) throw new Error(`No theme has enough usable maps (tried ${tooFew.join(', ')}).`);
-    await q(`UPDATE longforms SET theme = $2, updated_at = now() WHERE n = $1`, [n, theme.key]);
-    await say(`🎞 Long-form #${n} theme: <b>${esc(theme.name)}</b>${opts.theme ? '' : ' (the theme whose maps got your Shorts the most views)'}${tooFew.length ? `. Skipped ${esc(tooFew.join(', '))}: too few maps with good data` : ''}.`);
-    await q(`UPDATE longforms SET datasets = $2, updated_at = now() WHERE n = $1`, [n, plan.segments.map((s) => s.dataset_id)]);
-
-    // Voice: one call per map, so no single call runs into the voice engine's time limit.
-    const voice = pickVoice();
-    office.working('narrator', `Recording long-form #${n} (${voice})`);
-    const groups: Beat[][] = [plan.intro, ...plan.segments.map((s) => s.beats), plan.outro];
-    const clips: VoiceClip[] = [];
-    for (const [g, beats] of groups.entries()) {
-      step(`recording the voice, part ${g + 1} of ${groups.length}`);
-      clips.push(...await synthesize(beats.map((b, i) => ({ id: `g${String(g).padStart(2, '0')}b${String(i).padStart(2, '0')}`, text: b.vo })), voice, path.join(dir, 'voice')));
-    }
-    office.finished('narrator', `Long-form #${n}: ${clips.length} lines recorded`);
-    let timed = timeLongform(plan, clips);
-    const voiceTrack = path.join(dir, 'voice.wav');
-    await buildVoiceTrack(timed.placed, timed.seconds, voiceTrack);
-    // Time the captions from what the voice actually says, as the Shorts do. The placement doesn't
-    // depend on it, so only the caption words change.
-    try {
-      step('timing the captions from the voice');
-      timed = timeLongform(plan, clips, await transcribe(voiceTrack, 40 * 60_000));
-    } catch (e: any) {
-      step(`caption timing fell back to estimates: ${String(e.message).slice(0, 120)}`);
-    }
-    const props = longProps(plan, timed);
-    await fs.writeFile(path.join(dir, 'props.json'), JSON.stringify(props));
-
-    step(`rendering ${clock(timed.seconds)} of video (the longest step)`);
-    const silent = path.join(dir, 'silent.mp4');
-    await renderLongVideo(props, silent, (p) => office.progress('editor', p));
-    step('mixing voice and music');
-    const music = await pickMusic(n);
-    await finalMix(silent, voiceTrack, music, timed.seconds, longVideo(n));
-    await fs.rm(silent, { force: true });
-    step('drawing the thumbnail');
-    await renderThumb(thumbProps(plan), longThumb(n));
+    made ??= await makeClassic(job);
 
     // A light check: the file plays, has sound, and is as long as planned.
     const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height', '-of', 'json', longVideo(n)]);
@@ -283,8 +273,8 @@ export async function makeLongform(opts: { theme?: string; maps?: number } = {})
     const dur = Number(probe.format?.duration);
     const hasAudio = (probe.streams ?? []).some((s: any) => s.codec_type === 'audio');
     const video = (probe.streams ?? []).find((s: any) => s.codec_type === 'video');
-    if (!hasAudio || !(Math.abs(dur - timed.seconds) < 2) || video?.width !== 1920 || video?.height !== 1080) {
-      throw new Error(`Check failed: ${dur.toFixed(1)} s (planned ${timed.seconds.toFixed(1)} s), audio ${hasAudio ? 'yes' : 'no'}, ${video?.width}x${video?.height}`);
+    if (!hasAudio || !(Math.abs(dur - made.seconds) < 2) || video?.width !== 1920 || video?.height !== 1080) {
+      throw new Error(`Check failed: ${dur.toFixed(1)} s (planned ${made.seconds.toFixed(1)} s), audio ${hasAudio ? 'yes' : 'no'}, ${video?.width}x${video?.height}`);
     }
 
     // Copies under the media domain, so the files can be downloaded on the PC from a link.
@@ -294,23 +284,23 @@ export async function makeLongform(opts: { theme?: string; maps?: number } = {})
     await fs.copyFile(longVideo(n), path.join(config.mediaDir, 'longform', pub.video));
     await fs.copyFile(longThumb(n), path.join(config.mediaDir, 'longform', pub.thumb));
 
-    const packaging = longPackaging(plan, timed, n, music?.credit);
-    const related = await relatedShorts(plan.segments.map((s) => s.dataset_id));
+    const related = await relatedShorts(made.datasets);
     await q(`UPDATE longforms SET status = 'ready', packaging = $2, chapters = $3, related = $4, seconds = $5, video_path = $6, thumb_path = $7, public_files = $8, updated_at = now() WHERE n = $1`,
-      [n, packaging, JSON.stringify(timed.chapters), JSON.stringify(related), timed.seconds, longVideo(n), longThumb(n), pub]);
-    office.finished('editor', `Long-form #${n} ready: ${clock(timed.seconds)}`);
+      [n, made.packaging, JSON.stringify(made.chapters), JSON.stringify(related), made.seconds, longVideo(n), longThumb(n), pub]);
+    office.finished('editor', `Long-form #${n} ready: ${clock(made.seconds)}`);
     await rm(path.join(dir, 'voice'));
 
     const link = (f: string) => `https://${config.mediaDomain}/longform/${f}`;
     const keyboard: Keyboard = [[{ text: '✅ Approve', callback_data: `la:${n}` }, { text: '❌ Reject', callback_data: `lr:${n}` }]];
-    await sendPhoto(longThumb(n), [
-      `<b>Long-form #${n}</b> · ${esc(theme.name)} · ${plan.segments.length} maps · ${clock(timed.seconds)}`,
-      `<b>Title:</b> ${esc(packaging.title)}`,
-      `<b>Maps:</b> ${esc(plan.segments.map((s) => s.facts.title).join(' · '))}`,
+    const caption = (extra: string[]) => [
+      `<b>Long-form #${n}</b> · ${esc(made.theme.name)} · ${made.head} · ${clock(made.seconds)}`,
+      `<b>Title:</b> ${esc(made.packaging.title)}`,
+      ...extra,
       `<b>Watch it:</b> ${link(pub.video)}`,
       'Every number comes from the data; no language model wrote any line. Tap Approve for the upload steps.',
-    ].join('\n'), keyboard);
-    if (plan.skipped.length) console.log(`[longform ${n}] skipped: ${plan.skipped.join('; ')}`);
+    ].join('\n');
+    // Telegram cuts a photo caption at 1,024 characters, which could split an HTML tag and fail the send.
+    await sendPhoto(longThumb(n), caption(caption(made.lines).length <= 1000 ? made.lines : []), keyboard);
     return n;
   } catch (e: any) {
     office.failed('editor', `Long-form #${n} failed: ${String(e.message ?? e).slice(0, 140)}`);
@@ -318,6 +308,143 @@ export async function makeLongform(opts: { theme?: string; maps?: number } = {})
     await say(`⚠️ Long-form #${n} failed: ${esc(String(e.message ?? e).slice(0, 800))}\nNothing for you to do; I'll look at it. Send /longform to try again.`);
     return n;
   }
+}
+
+// A theme with too few good maps is skipped for the next best one, so the weekly video still gets
+// made. A theme Niko asked for by name is not swapped.
+async function firstTheme<T>(job: LongJob, plan: (t: Theme) => Promise<T>): Promise<{ theme: Theme; plan: T }> {
+  const tooFew: string[] = [];
+  for (const t of job.candidates) {
+    job.step(`picking the maps for ${t.name}`);
+    try {
+      const made = await plan(t);
+      await q(`UPDATE longforms SET theme = $2, updated_at = now() WHERE n = $1`, [job.n, t.key]);
+      if (!job.told.has(t.key)) {
+        job.told.add(t.key);
+        await say(`🎞 Long-form #${job.n} theme: <b>${esc(t.name)}</b>${job.opts.theme ? '' : ' (the theme whose maps got your Shorts the most views)'}${tooFew.length ? `. Skipped ${esc(tooFew.join(', '))}: too few maps with good data` : ''}.`);
+      }
+      return { theme: t, plan: made };
+    } catch (e) {
+      if (!(e instanceof TooFewMapsError) || job.candidates.length === 1) throw e;
+      tooFew.push(t.name);
+      job.step(String((e as Error).message).slice(0, 200));
+    }
+  }
+  throw new TooFewMapsError(`No theme has enough usable maps (tried ${tooFew.join(', ')}).`);
+}
+
+// The classic long-form: eight to ten maps, each counted down to its #1 (plan.ts, Longform.tsx).
+async function makeClassic(job: LongJob): Promise<Made> {
+  const { n, dir, step } = job;
+  const { theme, plan } = await firstTheme(job, (t) => planLongform({ theme: t, viewsByDataset: job.views, lookup, maps: job.opts.maps, onStep: step }));
+  await q(`UPDATE longforms SET datasets = $2, updated_at = now() WHERE n = $1`, [n, plan.segments.map((s) => s.dataset_id)]);
+
+  // Voice: one call per map, so no single call runs into the voice engine's time limit.
+  const voice = pickVoice();
+  office.working('narrator', `Recording long-form #${n} (${voice})`);
+  const groups: Beat[][] = [plan.intro, ...plan.segments.map((s) => s.beats), plan.outro];
+  const clips: VoiceClip[] = [];
+  for (const [g, beats] of groups.entries()) {
+    step(`recording the voice, part ${g + 1} of ${groups.length}`);
+    clips.push(...await synthesize(beats.map((b, i) => ({ id: `g${String(g).padStart(2, '0')}b${String(i).padStart(2, '0')}`, text: b.vo })), voice, path.join(dir, 'voice')));
+  }
+  office.finished('narrator', `Long-form #${n}: ${clips.length} lines recorded`);
+  let timed = timeLongform(plan, clips);
+  const voiceTrack = path.join(dir, 'voice.wav');
+  await buildVoiceTrack(timed.placed, timed.seconds, voiceTrack);
+  // Time the captions from what the voice actually says, as the Shorts do. The placement doesn't
+  // depend on it, so only the caption words change.
+  try {
+    step('timing the captions from the voice');
+    timed = timeLongform(plan, clips, await transcribe(voiceTrack, 40 * 60_000));
+  } catch (e: any) {
+    step(`caption timing fell back to estimates: ${String(e.message).slice(0, 120)}`);
+  }
+  const props = longProps(plan, timed);
+  await fs.writeFile(path.join(dir, 'props.json'), JSON.stringify(props));
+
+  step(`rendering ${clock(timed.seconds)} of video (the longest step)`);
+  const silent = path.join(dir, 'silent.mp4');
+  await renderLongVideo(props, silent, (p) => office.progress('editor', p));
+  step('mixing voice and music');
+  const music = await pickMusic(n);
+  await finalMix(silent, voiceTrack, music, timed.seconds, longVideo(n));
+  await fs.rm(silent, { force: true });
+  step('drawing the thumbnail');
+  await renderThumb(thumbProps(plan), longThumb(n));
+  if (plan.skipped.length) console.log(`[longform ${n}] skipped: ${plan.skipped.join('; ')}`);
+  return {
+    theme, seconds: timed.seconds, chapters: timed.chapters,
+    packaging: longPackaging(plan, timed, n, music?.credit),
+    datasets: plan.segments.map((s) => s.dataset_id),
+    head: `${plan.segments.length} maps`,
+    lines: [`<b>Maps:</b> ${esc(plan.segments.map((s) => s.facts.title).join(' · '))}`],
+  };
+}
+
+// The map quiz: a cold open, then a round per map where the viewer guesses before a timer runs out,
+// then the last reveal and the score (game.ts, game-time.ts, Game.tsx).
+async function makeGame(job: LongJob): Promise<Made> {
+  const { n, dir, step } = job;
+  const want = roundsWanted(job.opts.maps);
+  const { theme, plan } = await firstTheme(job, async (t) => {
+    const { picked, skipped } = await pickMaps({ theme: t, viewsByDataset: job.views, lookup, want, min: GAME_MIN_ROUNDS, onStep: step, skip: gameUnusable });
+    return planGame(t, picked, skipped);
+  });
+  await q(`UPDATE longforms SET datasets = $2, updated_at = now() WHERE n = $1`, [n, plan.rounds.map((r) => r.dataset_id)]);
+  console.log(`[longform ${n}] the quiz:\n${gameScript(plan)}`);
+
+  // Voice: one call per round (and one for the open and the ending), so no single call runs into
+  // the voice engine's time limit.
+  const voice = pickVoice();
+  office.working('narrator', `Recording long-form #${n} (${voice})`);
+  const flat = gameLines(plan);
+  const parts: number[][] = [];
+  flat.forEach((l, i) => {
+    const prev = flat[i - 1];
+    if (prev && prev.part === l.part && prev.round === l.round) parts[parts.length - 1].push(i);
+    else parts.push([i]);
+  });
+  const clips: VoiceClip[] = [];
+  for (const [g, idx] of parts.entries()) {
+    step(`recording the voice, part ${g + 1} of ${parts.length}`);
+    clips.push(...await synthesize(idx.map((i) => ({ id: `q${String(i).padStart(3, '0')}`, text: flat[i].line.vo })), voice, path.join(dir, 'voice')));
+  }
+  office.finished('narrator', `Long-form #${n}: ${clips.length} lines recorded`);
+  let timed = timeGame(plan, clips);
+  const voiceTrack = path.join(dir, 'voice.wav');
+  await buildVoiceTrack(timed.placed, timed.seconds, voiceTrack);
+  // Cards pop on the word that names them, so the word timings come from the voice itself, as the
+  // Shorts' captions do. The lines stay where they are; only the moments inside them move.
+  try {
+    step('timing the words from the voice');
+    timed = timeGame(plan, clips, await transcribe(voiceTrack, 40 * 60_000));
+  } catch (e: any) {
+    step(`word timing fell back to estimates: ${String(e.message).slice(0, 120)}`);
+  }
+  const props = gameProps(plan, timed, config.channelHandle);
+  await fs.writeFile(path.join(dir, 'props.json'), JSON.stringify(props));
+
+  step(`rendering ${clock(timed.seconds)} of video (the longest step)`);
+  const silent = path.join(dir, 'silent.mp4');
+  await renderLongVideo(props, silent, (p) => office.progress('editor', p), 'LongformGame');
+  step('mixing voice, music and sound effects');
+  const music = await pickMusic(n);
+  const sfx = await mixSfx(timed.sfx, timed.seconds, dir);
+  await finalMix(silent, voiceTrack, music, timed.seconds, longVideo(n), sfx);
+  await rm(silent);
+  await rm(path.join(dir, 'sfx'));
+  if (sfx) await rm(sfx);
+  step('drawing the thumbnail');
+  await renderThumb(gameThumbProps(plan), longThumb(n));
+  if (plan.skipped.length) console.log(`[longform ${n}] skipped: ${plan.skipped.join('; ')}`);
+  return {
+    theme, seconds: timed.seconds, chapters: timed.chapters,
+    packaging: gamePackaging(plan, timed, n, music?.credit),
+    datasets: plan.rounds.map((r) => r.dataset_id),
+    head: `map quiz, ${plan.rounds.length} rounds`,
+    lines: [`<b>Rounds:</b> ${esc(plan.rounds.map((r) => r.view.title).join(' · '))}`],
+  };
 }
 
 async function rm(p: string) { await fs.rm(p, { recursive: true, force: true }).catch(() => undefined); }
