@@ -5,6 +5,7 @@ import express from 'express';
 import { config } from './config.js';
 import { applySchema, one, q } from './db.js';
 import { queue } from './lib/queue.js';
+import { deletionResult, mapFixSweep, n8nInstalled, pendingDeletions, replacementUploaded, tick as replaceTick } from './replace.js';
 import { produceOne, cleanupOldRenders, requeueTiedRejects } from './produce.js';
 import { discover } from './discover.js';
 import { instagramDue, linkVideo } from './publish.js';
@@ -71,6 +72,8 @@ app.post('/jobs/:id/youtube', async (req, res) => {
     return res.json({ ok: true });
   }
   const id = Number(req.params.id);
+  // A replacement upload (replace.ts) gets its own message once the old video is deleted.
+  if (await replacementUploaded(id, videoId)) return res.json({ ok: true });
   const msg = await linkVideo(id, videoId);
   await say(`${msg}\nPin the comment once it's live.`);
   res.json({ ok: true });
@@ -87,6 +90,20 @@ app.get('/jobs/:id', async (req, res) => {
   const job = await one('SELECT id, status, format, packaging, qa, youtube_video_id, slot_at FROM jobs WHERE id = $1', [Number(req.params.id)]);
   if (!job) return res.status(404).json({ error: 'not found' });
   res.json(job);
+});
+
+// The server's delete step (tools/autodeploy/youtube-delete.py): which old scheduled videos to
+// delete now that their replacement is uploaded, and how it went.
+app.get('/youtube/deletions', async (_req, res) => res.json(await pendingDeletions()));
+app.post('/youtube/deletions/:id', async (req, res) => {
+  await deletionResult(Number(req.params.id), { ok: !!req.body?.ok, detail: req.body?.detail ? String(req.body.detail).slice(0, 400) : undefined });
+  res.json({ ok: true });
+});
+
+// autodeploy.sh installed workflows from n8n/workflows/auto/.
+app.post('/n8n/installed', async (req, res) => {
+  await n8nInstalled(Array.isArray(req.body?.workflows) ? req.body.workflows.map(String) : []);
+  res.json({ ok: true });
 });
 
 // WF5: analytics.
@@ -187,6 +204,9 @@ setInterval(async () => {
   }
 }, 10 * 60_000);
 
+// Scheduled Shorts being swapped for a new render (replace.ts).
+setInterval(() => { replaceTick().catch((e) => console.error('[replace]', e.message)); }, 2 * 60_000);
+
 // Per Capita Nation: the daily census when it's due, and the episode's approval before its slot.
 setInterval(() => { nationTick().catch((e) => console.error('[nation]', e.message)); }, 2 * 60_000);
 
@@ -203,5 +223,8 @@ app.listen(config.port, async () => {
   await applySchema().catch((e) => console.error('[schema]', e.message));
   await recoverInterrupted().catch((e) => console.error('[recover]', e));
   void startBot();
+  // Once per map version: swap scheduled Shorts and previews rendered with the old maps.
+  await mapFixSweep().catch((e) => console.error('[map fix]', e.message));
+  void replaceTick().catch((e) => console.error('[replace]', e.message));
   await say(`🟢 Render worker started. Send /status any time. ${esc(config.channelName)}`).catch(() => undefined);
 });

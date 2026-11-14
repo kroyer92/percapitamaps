@@ -7,6 +7,7 @@ import { geoEqualEarth, geoPath, geoCentroid } from 'd3-geo';
 import { spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import { worldFeatures } from '../world';
 import { numericToIso3 } from '../iso';
+import { shapeSize } from '../geo-size';
 import { C } from '../theme';
 
 type Feat = { type: 'Feature'; id: string; iso3?: string; geometry: any; properties: any };
@@ -33,9 +34,9 @@ function camFor(iso: string | undefined, zoom = 1): Camera {
   const f = iso ? FEATURES.find((x) => x.iso3 === iso) : undefined;
   if (!f) return HOME;
   const m = mainland(f);
-  const [[x0, y0], [x1, y1]] = path.bounds(m as any);
-  const [cx, cy] = projection(geoCentroid(m as any)) ?? [(x0 + x1) / 2, (y0 + y1) / 2];
-  const k = Math.max(1.4, Math.min(5, Math.min((LM.w * 0.45) / Math.max(1, x1 - x0), (LM.h * 0.45) / Math.max(1, y1 - y0)))) * zoom;
+  const [bw, bh] = shapeSize(projection, m);
+  const [cx, cy] = projection(geoCentroid(m as any))!;
+  const k = Math.max(1.4, Math.min(5, Math.min((LM.w * 0.45) / Math.max(1, bw), (LM.h * 0.45) / Math.max(1, bh)))) * zoom;
   return { k, cx, cy };
 }
 
@@ -70,9 +71,9 @@ export const GameMap: React.FC<{
   const pulse = act ? spring({ frame: frame - active!.at, fps, config: { damping: 12 } }) : 0;
   let ring: { x: number; y: number } | undefined;
   if (act) {
-    const [[x0, y0], [x1, y1]] = path.bounds(act as any);
+    const [bw, bh] = shapeSize(projection, act);
     const p = projection(geoCentroid(mainland(act) as any));
-    if (p && Math.max(x1 - x0, y1 - y0) * k < 40) ring = { x: p[0], y: p[1] };
+    if (p && Math.max(bw, bh) * k < 40) ring = { x: p[0], y: p[1] };
   }
   const lineColor = active?.amber ? C.amber : '#ffffff';
 

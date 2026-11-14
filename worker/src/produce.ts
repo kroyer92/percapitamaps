@@ -10,7 +10,7 @@ import { openingFor, spokenName, type Opening } from './opening.js';
 import { cutOnScreen, wordCount } from './validate.js';
 import { takeModelsUsed, unloadModels } from './llm.js';
 import { lowEndProblem } from './discover.js';
-import { renderShort } from './render.js';
+import { MAP_VERSION, renderShort } from './render.js';
 import { runQa, qaSummary, type QaReport } from './qa.js';
 import { esc, sendVideo, say, alert, type Keyboard } from './telegram.js';
 import { fitFormat, pickFormat, blockedFormat } from './formats.js';
@@ -66,7 +66,7 @@ export interface JobRow {
   critic: Content['critic'];
   chosen_hook: number;
   video_path: string | null;
-  render: { clips: VoiceClip[]; seconds: number; music?: MusicPick } | null;
+  render: { clips: VoiceClip[]; seconds: number; music?: MusicPick; map?: number } | null;
   qa: QaReport | null;
   slot_at: Date | null;
   series_no: number | null;
@@ -302,7 +302,7 @@ export async function renderAndPreview(id: number, reuseClips = false, stage = {
     guessOptions: job.format === 'GUESS' ? job.facts.guess?.options : undefined,
   }).catch((e) => { office.failJob(id, `QA crashed: ${e.message}`); throw e; });
   await q(`UPDATE jobs SET video_path = $2, render = $3, qa = $4, status = $5, updated_at = now() WHERE id = $1`, [
-    id, res.video, { clips: res.clips, seconds: res.seconds, music: res.music }, qa, qa.passed ? 'awaiting_approval' : 'render_failed',
+    id, res.video, { clips: res.clips, seconds: res.seconds, music: res.music, map: MAP_VERSION }, qa, qa.passed ? 'awaiting_approval' : 'render_failed',
   ]);
   const bad = qa.checks.filter((c) => c.status === 'fail').map((c) => c.name);
   if (qa.passed) office.finished('checker', `All checks passed${qa.checks.some((c) => c.status === 'warn') ? ' (with warnings)' : ''}`, id);

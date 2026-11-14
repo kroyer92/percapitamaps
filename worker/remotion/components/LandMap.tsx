@@ -6,6 +6,7 @@ import { geoEqualEarth, geoPath, geoCentroid } from 'd3-geo';
 import { Easing, interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion';
 import { worldFeatures } from '../world';
 import { numericToIso3 } from '../iso';
+import { shapeSize } from '../geo-size';
 import { C } from '../theme';
 
 type Feat = { type: 'Feature'; id: string; iso3?: string; geometry: any; properties: any };
@@ -33,10 +34,10 @@ function camFor(iso: string | undefined): Camera | undefined {
   const f = iso ? FEATURES.find((x) => x.iso3 === iso) : undefined;
   if (!f) return undefined;
   const m = mainland(f);
-  const [[x0, y0], [x1, y1]] = path.bounds(m as any);
-  const [cx, cy] = projection(geoCentroid(m as any)) ?? [(x0 + x1) / 2, (y0 + y1) / 2];
+  const [bw, bh] = shapeSize(projection, m);
+  const [cx, cy] = projection(geoCentroid(m as any))!;
   // A big country gets a gentle zoom, a small one a closer look, but the region stays readable.
-  const k = Math.max(1.4, Math.min(5, Math.min((LM.w * 0.45) / Math.max(1, x1 - x0), (LM.h * 0.45) / Math.max(1, y1 - y0))));
+  const k = Math.max(1.4, Math.min(5, Math.min((LM.w * 0.45) / Math.max(1, bw), (LM.h * 0.45) / Math.max(1, bh))));
   return { k, cx, cy };
 }
 
@@ -94,9 +95,9 @@ export const LandMap: React.FC<{
   // Small countries get a ring, or they'd be invisible.
   let ring: { x: number; y: number } | undefined;
   if (active) {
-    const [[x0, y0], [x1, y1]] = path.bounds(active as any);
+    const [bw, bh] = shapeSize(projection, active);
     const p = projection(geoCentroid(mainland(active) as any));
-    if (p && Math.max(x1 - x0, y1 - y0) * k < 40) ring = { x: p[0], y: p[1] };
+    if (p && Math.max(bw, bh) * k < 40) ring = { x: p[0], y: p[1] };
   }
 
   return (
