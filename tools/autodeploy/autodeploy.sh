@@ -53,6 +53,14 @@ n8n_auto() {
   done
   if [ -z "$FAIL" ]; then
     (cd "$ROOT" && docker compose restart n8n) >>"$TMPD/err" 2>&1 || FAIL="restarting n8n failed"
+    # n8n answers 404 on its webhooks until it has started its workflows: wait for that (up to 3 min).
+    local t
+    for t in $(seq 1 36); do
+      (cd "$ROOT" && docker compose exec -T n8n node -e \
+        "fetch('http://localhost:5678/healthz/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))") >/dev/null 2>&1 && break
+      sleep 5
+    done
+    sleep 20
   fi
   { echo "== $(date -u +%FT%TZ) n8n auto: ${names[*]} ${FAIL:-ok}"; cat "$TMPD/err"; } >>/var/log/percapita-autodeploy.log
   rm -rf "$TMPD"

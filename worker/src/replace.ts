@@ -179,6 +179,12 @@ export async function tick(): Promise<void> {
   busy = true;
   try {
     for (const r of Object.values(await book())) {
+      // Swaps given up on before WF3 refusals were retried (the 14 Nov 2026 wheat Short, #74): the
+      // new render is done, so it goes back to waiting for the upload while there is time.
+      if (r.state === 'failed' && r.video && /^n8n WF3 webhook answered/.test(r.error ?? '') && minutesTo(r.slot) > MIN_LEAD_MIN / 2) {
+        await save({ ...r, state: 'ready' });
+        continue;
+      }
       if (r.state === 'queued') {
         if (minutesTo(r.slot) < MIN_LEAD_MIN) {
           await save({ ...r, state: 'failed', error: 'too close to the slot' });
@@ -199,12 +205,17 @@ export async function tick(): Promise<void> {
         await save({ ...r, state: 'queued' });
       } else if (r.state === 'ready') {
         if (minutesTo(r.slot) < MIN_LEAD_MIN / 2) {
-          await save({ ...r, state: 'failed', error: 'the delete step was not ready in time' });
-          await alert(`#${r.job} was not replaced: the n8n delete step (${DELETER}) never reported as installed. The old version goes live as scheduled.`);
+          await save({ ...r, state: 'failed', error: r.error ?? 'the delete step was not ready in time' });
+          await alert(r.error
+            ? `#${r.job} was not replaced: WF3 kept refusing the new version (${r.error}). The old version goes live as scheduled.`
+            : `#${r.job} was not replaced: the n8n delete step (${DELETER}) never reported as installed. The old version goes live as scheduled.`);
         } else if (await deleterReady()) {
+          // WF3 can refuse for a moment (n8n answers 404 while it is still starting, e.g. right after
+          // autodeploy restarted it), so a refused hand-off stays ready and is tried again next round.
+          // Nothing was uploaded in that case. The slot cut-off above ends the retries.
           await upload(r).catch(async (e) => {
-            await save({ ...r, state: 'failed', error: String(e.message ?? e) });
-            await alert(`#${r.job} was not replaced: sending the new version to WF3 failed (${e.message}). The old version goes live as scheduled.`);
+            console.error(`[replace ${r.job}] WF3 hand-off failed, retrying:`, e.message);
+            await save({ ...r, state: 'ready', error: String(e.message ?? e) });
           });
         }
       } else if (r.state === 'deleting' && minutesTo(r.slot) < 20) {
