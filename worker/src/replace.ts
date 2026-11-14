@@ -207,6 +207,9 @@ export async function tick(): Promise<void> {
             await alert(`#${r.job} was not replaced: sending the new version to WF3 failed (${e.message}). The old version goes live as scheduled.`);
           });
         }
+      } else if (r.state === 'deleting' && minutesTo(r.slot) < 20) {
+        await save({ ...r, state: 'failed', error: 'WF7 did not delete the old video in time' });
+        await alert(`#${r.job}: the old scheduled video https://youtu.be/${r.old_video_id} is still there 20 minutes before the slot (WF7 did not run). Delete it in YouTube Studio, or both versions go live. The new one is https://youtu.be/${r.new_video_id}.`);
       } else if (r.state === 'uploading' && Date.now() - new Date(r.updated_at).getTime() > UPLOAD_TIMEOUT_MIN * 60_000) {
         await save({ ...r, state: 'failed', error: 'WF3 never reported the upload' });
         await alert(`#${r.job}: the new version was sent to WF3 ${UPLOAD_TIMEOUT_MIN} minutes ago but never reported back, so the old scheduled video was kept. Check WF3's executions in n8n; if a second copy was uploaded, delete the newer one.`);
