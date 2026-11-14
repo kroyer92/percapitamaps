@@ -7,6 +7,7 @@ import { queue } from './lib/queue.js';
 import { produceOne, swapHook, type JobRow } from './produce.js';
 import { approve, linkVideo, parseVideoId } from './publish.js';
 import { queueFollowup } from './followups.js';
+import { requestReplacement } from './replace.js';
 import { fmtIn } from './lib/time.js';
 import { setTune } from './tune.js';
 import { approveLongform, linkLongform, makeLongform, rejectLongform } from './longform/make.js';
@@ -21,6 +22,7 @@ const HELP = [
   '',
   '/link &lt;job&gt; &lt;url&gt; – connect an uploaded video to its job (long-form: /link L1 &lt;url&gt;)',
   '/longform [theme] [game|classic] – make the long-form video now (it also runs by itself every Saturday evening; game or classic picks the style for this one)',
+  '/replace &lt;job&gt; – swap a scheduled Short for a new render with the current code (same time; the old one is deleted)',
   '/followup &lt;job or video URL&gt; – queue 2 related videos (winners get theirs automatically)',
   '/produce [n] – make n videos now (default 1)',
   '/videos – every recent video, its link and its scorecards',
@@ -95,6 +97,12 @@ async function onMessage(text: string): Promise<void> {
       const id = args[0] ? await jobFromRef(args[0]) : undefined;
       if (!id) { await say('Use it like this: <code>/followup 12</code> or <code>/followup https://youtube.com/shorts/…</code>'); return; }
       await queueFollowup(id);
+      return;
+    }
+    case '/replace': {
+      const id = args[0] ? await jobFromRef(args[0]) : undefined;
+      if (!id) { await say('Use it like this: <code>/replace 74</code>'); return; }
+      await say(await requestReplacement(id, 'Re-rendered with the current code (asked for in Telegram).'));
       return;
     }
     case '/nation':

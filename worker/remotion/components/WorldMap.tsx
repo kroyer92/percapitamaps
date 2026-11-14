@@ -3,6 +3,7 @@ import { geoEqualEarth, geoPath, geoCentroid } from 'd3-geo';
 import { interpolate, spring, useCurrentFrame, useVideoConfig, Easing } from 'remotion';
 import { worldFeatures } from '../world';
 import { numericToIso3 } from '../iso';
+import { facing, shapeSize } from '../geo-size';
 import { C, FONT, MAP, W, ZONE } from '../theme';
 import type { TimedBeat } from '../types';
 
@@ -61,9 +62,9 @@ export function camFor(iso: string | undefined, drop: number, box: { w: number; 
   const f = iso ? FEATURES.find((x) => x.iso3 === iso) : undefined;
   if (!f) return undefined;
   const m = mainland(f);
-  const [[x0, y0], [x1, y1]] = path.bounds(m as any);
-  const [cx, cy] = projection(geoCentroid(m as any)) ?? [(x0 + x1) / 2, (y0 + y1) / 2];
-  const k = Math.max(1.8, Math.min(14, Math.min(box.w / Math.max(1, x1 - x0), box.h / Math.max(1, y1 - y0))));
+  const [w, h] = shapeSize(projection, m);
+  const [cx, cy] = projection(geoCentroid(m as any))!;
+  const k = Math.max(1.8, Math.min(14, Math.min(box.w / Math.max(1, w), box.h / Math.max(1, h))));
   return { k, cx: cx + shiftX / k, cy: cy - drop / k };
 }
 
@@ -74,14 +75,16 @@ export const CountryShape: React.FC<{ iso: string; w: number; h: number; color: 
   if (!f) return <div style={{ width: w, height: h }} />;
   const m = mainland(f);
   const shape = path.area(m as any) >= 0.5 * path.area(f as any) ? m : f;
-  const [[x0, y0], [x1, y1]] = path.bounds(shape as any);
+  // Drawn with the projection turned to face the country, so one crossing 180° stays whole.
+  const own = geoPath(facing(projection, shape));
+  const [[x0, y0], [x1, y1]] = own.bounds(shape as any);
   const k = Math.min((w * 0.86) / Math.max(1e-6, x1 - x0), (h * 0.86) / Math.max(1e-6, y1 - y0));
   const tx = w / 2 - ((x0 + x1) / 2) * k;
   const ty = h / 2 - ((y0 + y1) / 2) * k;
   return (
     <svg width={w} height={h} style={{ overflow: 'visible' }}>
       <g transform={`translate(${tx},${ty}) scale(${k})`}>
-        <path d={path(shape as any) ?? ''} fill={color} stroke={stroke ?? 'none'} strokeWidth={3 / k} strokeLinejoin="round" />
+        <path d={own(shape as any) ?? ''} fill={color} stroke={stroke ?? 'none'} strokeWidth={3 / k} strokeLinejoin="round" />
       </g>
     </svg>
   );
@@ -191,8 +194,8 @@ export const WorldMap: React.FC<{
   const markers = ringed.flatMap((iso) => {
     const f = FEATURES.find((x) => x.iso3 === iso);
     if (!f) return [];
-    const [[x0, y0], [x1, y1]] = path.bounds(f as any);
-    if (Math.max(x1 - x0, y1 - y0) * cam.k > 45) return [];
+    const [w, h] = shapeSize(projection, f);
+    if (Math.max(w, h) * cam.k > 45) return [];
     const p = projection(geoCentroid(f as any));
     return p ? [{ iso, x: p[0], y: p[1], at: iso === activeIso && active ? active.start : amberAt(iso) }] : [];
   });

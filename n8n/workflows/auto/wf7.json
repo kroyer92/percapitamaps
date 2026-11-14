@@ -1,0 +1,413 @@
+{
+  "id": "Pc7RplcDelVid0WF",
+  "name": "WF7 Delete replaced video",
+  "active": false,
+  "nodes": [
+    {
+      "id": "wf7-every5",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "wf7-manual",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        180
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "wf7-ask",
+      "name": "Ask the worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.PERCAPITA_WORKER_URL || 'http://render-worker:8080' }}/youtube/deletions",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "wf7-due",
+      "name": "Deletions due",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        80
+      ],
+      "parameters": {
+        "jsCode": "\n// The worker's list (an empty list means nothing to do this round).\nconst r = $input.first().json;\nconst list = r.statusCode === 200 && Array.isArray(r.body) ? r.body : [];\nreturn list.map((d) => ({ json: d }));\n"
+      }
+    },
+    {
+      "id": "wf7-chan",
+      "name": "My channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.YOUTUBE_API_BASE || 'https://www.googleapis.com/youtube/v3' }}/channels?part=id&mine=true",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "wf7-vids",
+      "name": "Both videos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.YOUTUBE_API_BASE || 'https://www.googleapis.com/youtube/v3' }}/videos?part=status,snippet&id={{ $('Deletions due').item.json.old_video_id }},{{ $('Deletions due').item.json.new_video_id }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "wf7-decide",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        80
+      ],
+      "parameters": {
+        "jsCode": "\n// Checks before anything is deleted (see worker/src/replace.ts):\n// the new video is on our channel and scheduled for the slot, and the old one is still a private,\n// scheduled video with the expected title. Anything else is reported, never deleted.\nconst d = $('Deletions due').item.json;\nconst ch = $('My channel').item.json;\nconst vids = $('Both videos').item.json;\nconst slot = new Date(d.slot).getTime();\nconst soon = slot - Date.now() < 30 * 60_000;\nconst out = (action, ok, detail) => ({ json: { ...d, action, payload: JSON.stringify({ ok, detail }) } });\n// No answer at all (network hiccup): try again next round, unless the slot is near.\nif ((!ch.statusCode || !vids.statusCode) && !soon) return out('wait', false, '');\nif (ch.statusCode !== 200 || !ch.body?.items?.length) return out('report', false, `YouTube login failed (channels answered ${ch.statusCode})`);\nif (vids.statusCode !== 200) return out('report', false, `YouTube answered ${vids.statusCode} when reading the videos`);\nconst mine = ch.body.items[0].id;\nconst byId = Object.fromEntries((vids.body.items ?? []).map((v) => [v.id, v]));\nconst neu = byId[d.new_video_id];\nconst neuAt = neu?.status?.publishAt ? new Date(neu.status.publishAt).getTime() : NaN;\nif (!neu || neu.snippet.channelId !== mine || ['failed', 'rejected', 'deleted'].includes(neu.status.uploadStatus) || !(Math.abs(neuAt - slot) <= 120_000)) {\n  // A fresh upload can take a moment to show up: wait for the next round unless the slot is near.\n  return soon ? out('report', false, `the new video is not scheduled for the slot (status ${neu?.status?.uploadStatus}, publishAt ${neu?.status?.publishAt})`) : out('wait', false, '');\n}\nconst old = byId[d.old_video_id];\nif (!old) return out('report', true, 'the old video was already gone');\nconst oldAt = old.status.publishAt ? new Date(old.status.publishAt).getTime() : NaN;\nif (old.snippet.channelId !== mine) return out('report', false, 'the old video is not on this channel');\nif (old.status.privacyStatus !== 'private' || !(oldAt > Date.now())) return out('report', false, `the old video is no longer a scheduled private video (privacy ${old.status.privacyStatus}, publishAt ${old.status.publishAt}), so it was left alone`);\nif (d.title && old.snippet.title.trim() !== d.title.trim()) return out('report', false, `the old video is titled \"${old.snippet.title}\", not \"${d.title}\", so it was left alone`);\nreturn out('delete', true, 'deleted');\n",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "wf7-isdel",
+      "name": "Delete it?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "wf7-isdel-c",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "delete",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf7-del",
+      "name": "Delete the old video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "method": "DELETE",
+        "url": "={{ $env.YOUTUBE_API_BASE || 'https://www.googleapis.com/youtube/v3' }}/videos?id={{ $json.old_video_id }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "wf7-after",
+      "name": "Deleted?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst d = $('Decide').item.json;\nconst r = $json;\nconst ok = r.statusCode === 204 || r.statusCode === 200 || r.statusCode === 404;\nconst detail = r.statusCode === 404 ? 'the old video was already gone' : ok ? 'deleted' : `YouTube answered ${r.statusCode} to the delete: ${JSON.stringify(r.body ?? '').slice(0, 200)}`;\nreturn { json: { ...d, payload: JSON.stringify({ ok, detail }) } };\n",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "wf7-isrep",
+      "name": "Report it?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "wf7-isrep-c",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "report",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf7-tell",
+      "name": "Tell the worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PERCAPITA_WORKER_URL || 'http://render-worker:8080' }}/youtube/deletions/{{ $json.job }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.payload }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Every 5 minutes": {
+      "main": [
+        [
+          {
+            "node": "Ask the worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Ask the worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask the worker": {
+      "main": [
+        [
+          {
+            "node": "Deletions due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deletions due": {
+      "main": [
+        [
+          {
+            "node": "My channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "My channel": {
+      "main": [
+        [
+          {
+            "node": "Both videos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Both videos": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Delete it?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete it?": {
+      "main": [
+        [
+          {
+            "node": "Delete the old video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report it?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete the old video": {
+      "main": [
+        [
+          {
+            "node": "Deleted?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deleted?": {
+      "main": [
+        [
+          {
+            "node": "Tell the worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report it?": {
+      "main": [
+        [
+          {
+            "node": "Tell the worker",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "errorWorkflow": "WaMuKb7OhPyHjGKs",
+    "saveDataSuccessExecution": "none"
+  },
+  "pinData": {},
+  "tags": []
+}

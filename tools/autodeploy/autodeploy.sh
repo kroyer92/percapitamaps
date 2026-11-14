@@ -21,6 +21,61 @@ tell() {
     --data-urlencode "chat_id=$CHAT" --data-urlencode "text=$1" -d parse_mode=HTML >/dev/null || true
 }
 
+# n8n workflows in n8n/workflows/auto/ install themselves: each new or changed file is imported with
+# the credentials the live workflows already use (n8n-prepare.py reads only their ids), published,
+# and n8n restarted so it takes effect. The worker is told which ones are in (it waits for WF7 before
+# swapping a scheduled video). Runs before the "nothing new" exit, so a file that arrived with the
+# previous update is installed on the next run.
+n8n_auto() {
+  local STATE=/var/lib/percapita-autodeploy TMPD f sum id names=() files=() sums=()
+  mkdir -p "$STATE"
+  for f in "$APP"/n8n/workflows/auto/*.json; do
+    [ -e "$f" ] || continue
+    sum=$(sha256sum "$f" | cut -c1-64)
+    [ "$(cat "$STATE/$(basename "$f").sha" 2>/dev/null)" = "$sum" ] && continue
+    files+=("$f"); sums+=("$sum")
+  done
+  [ ${#files[@]} -eq 0 ] && return 0
+  TMPD=$(mktemp -d)
+  local FAIL=""
+  (cd "$ROOT" && docker compose exec -T n8n n8n export:workflow --all >"$TMPD/live.json" 2>>"$TMPD/err") || FAIL="could not read the live workflows"
+  local i
+  for i in "${!files[@]}"; do
+    [ -n "$FAIL" ] && break
+    f=${files[$i]}
+    python3 "$APP/tools/autodeploy/n8n-prepare.py" "$f" "$TMPD/live.json" >"$TMPD/ready.json" 2>>"$TMPD/err" || { FAIL="$(basename "$f"): $(tail -1 "$TMPD/err")"; break; }
+    id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["id"])' "$TMPD/ready.json")
+    names+=("$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[0]["name"])' "$TMPD/ready.json")")
+    (cd "$ROOT" && docker compose exec -T n8n sh -c 'cat > /tmp/percapita-auto-wf.json' <"$TMPD/ready.json" \
+      && docker compose exec -T n8n n8n import:workflow --input=/tmp/percapita-auto-wf.json \
+      && docker compose exec -T n8n n8n publish:workflow --id="$id" \
+      && docker compose exec -T n8n rm -f /tmp/percapita-auto-wf.json) >>"$TMPD/err" 2>&1 || FAIL="$(basename "$f"): import or publish failed"
+  done
+  if [ -z "$FAIL" ]; then
+    (cd "$ROOT" && docker compose restart n8n) >>"$TMPD/err" 2>&1 || FAIL="restarting n8n failed"
+  fi
+  { echo "== $(date -u +%FT%TZ) n8n auto: ${names[*]} ${FAIL:-ok}"; cat "$TMPD/err"; } >>/var/log/percapita-autodeploy.log
+  rm -rf "$TMPD"
+  if [ -n "$FAIL" ]; then
+    # Say it once per version of the files, then keep retrying quietly every 5 minutes.
+    local key; key=$(printf '%s' "${sums[*]}" | sha256sum | cut -c1-64)
+    if [ "$(cat "$STATE/n8n-auto.failed" 2>/dev/null)" != "$key" ]; then
+      echo "$key" >"$STATE/n8n-auto.failed"
+      tell "⚠️ Installing an n8n workflow by itself failed ($FAIL). Claude can read the details in /var/log/percapita-autodeploy.log; it tries again every 5 minutes."
+    fi
+    return 1
+  fi
+  for i in "${!files[@]}"; do echo "${sums[$i]}" >"$STATE/$(basename "${files[$i]}").sha"; done
+  rm -f "$STATE/n8n-auto.failed"
+  local list; list=$(printf '"%s",' "${names[@]}"); list="[${list%,}]"
+  (cd "$ROOT" && docker compose exec -T render-worker node -e \
+    "fetch('http://localhost:'+(process.env.PORT||8080)+'/n8n/installed',{method:'POST',headers:{'Content-Type':'application/json'},body:process.argv[1]}).catch(()=>{})" \
+    "{\"workflows\":$list}") >/dev/null 2>&1 || true
+  tell "🧩 n8n workflow installed and switched on by itself: ${names[*]}"
+}
+
+cd "$APP" || exit 1
+n8n_auto
 cd "$APP" || exit 1
 git fetch -q origin main || exit 0   # GitHub unreachable: try again next time
 OLD=$(git rev-parse HEAD)
@@ -60,7 +115,7 @@ $TITLES"
 fi
 
 NOTE=""
-if echo "$CHANGED" | grep -qE '^n8n/workflows/'; then
+if echo "$CHANGED" | grep -qE '^n8n/workflows/[^/]+\.json$'; then
   NOTE="
 An n8n workflow file changed too; that one still needs its own re-import (Claude will say if it matters)."
 fi

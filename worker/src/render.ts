@@ -75,6 +75,11 @@ export function buildProps(format: Format, facts: Facts, ds: Pick<CatalogEntry, 
 
 export interface RenderResult { video: string; seconds: number; props: ShortProps; music?: MusicPick; clips: VoiceClip[]; heard?: Word[] }
 
+// Bumped when the maps change in a way a viewer would notice; renders store it in jobs.render.map
+// (replace.ts swaps scheduled Shorts made with an older one). 2 = India's official Kashmir borders
+// (PR #41) and countries that cross the 180° line (Russia) drawn whole.
+export const MAP_VERSION = 2;
+
 export async function renderShort(opts: {
   workDir: string;
   outFile: string;
