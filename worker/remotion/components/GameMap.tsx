@@ -4,15 +4,14 @@
 // the years or light up a group of countries.
 import React from 'react';
 import { geoEqualEarth, geoPath, geoCentroid } from 'd3-geo';
-import { feature } from 'topojson-client';
 import { spring, useCurrentFrame, useVideoConfig } from 'remotion';
-import world from 'world-atlas/countries-50m.json';
+import { worldFeatures } from '../world';
 import { numericToIso3 } from '../iso';
 import { C } from '../theme';
 
 type Feat = { type: 'Feature'; id: string; iso3?: string; geometry: any; properties: any };
 
-const FEATURES: Feat[] = (feature(world as any, (world as any).objects.countries) as any).features
+const FEATURES: Feat[] = worldFeatures()
   .filter((f: any) => f.id !== '010') // Antarctica
   .map((f: any) => ({ ...f, iso3: numericToIso3(String(f.id).padStart(3, '0')) }));
 
