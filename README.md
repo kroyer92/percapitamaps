@@ -251,8 +251,10 @@ Every hour WF6 reads the newest 100 comment threads on the channel (and all repl
 threads, such as the pinned comment) and hands them to the worker. For each comment nobody from
 the channel has answered yet, Telegram gets one message: the comment, the one thing to do, and
 the reply text to paste (tap the grey text to copy it, then "Open the comment"). At most 8 per
-run (`COMMENTS_PER_RUN`), newest first; the rest come an hour later. Instagram comments on the
-cross-posted Reels come the same way when the token may read them.
+run (`COMMENTS_PER_RUN`), newest first; the rest come an hour later. Instagram comments come the
+same way, from every Reel on the account in the last 30 days (also ones posted by hand). The token
+needs `instagram_business_manage_comments`; while Instagram can't be read, Telegram says why and
+gives the exact fix once a day, and one broken or deleted Reel never hides the others.
 
 - **Numbers only from the video's own data.** A comment that names countries ("what about
   Vietnam?", "as a German…", "I guessed Qatar") gets their rank and value from the same ranking
