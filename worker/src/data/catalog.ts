@@ -45,6 +45,15 @@ export const HIGH_END: Record<string, { means: string; wrongWay: RegExp }> = {
   wb_gini: { means: 'the most UNEQUAL incomes (a higher Gini means more inequality)', wrongWay: /\b(equal|equally|equality|fair|fairer|fairest|fairly)\b/i },
 };
 
+// Datasets measured relative to one country, which therefore sits at a fixed value by definition
+// (the US is always 100% of US prices). That country is the yardstick, not a result, so it is left
+// out of the ranking, the map and every list; otherwise a Short shows "#4 United States 100%"
+// for a question that is about the US. Kept in code, like HIGH_END, so it applies to queued topics too.
+export const BASELINE: Record<string, { iso3: string; name: string; value: string }> = {
+  wb_price_level: { iso3: 'USA', name: 'the United States', value: '100%' },
+  wb_100_dollars: { iso3: 'USA', name: 'the United States', value: '$100' },
+};
+
 export const CATALOG: CatalogEntry[] = [
   // ---------- money ----------
   { id: 'wb_gdp_pc_ppp', title: 'GDP per person, adjusted for prices', unit: 'international dollars per person', topic: 'money', grp: 'income', ref: wb('NY.GDP.PCAP.PP.KD'), sourceName: WB, license: WB_LIC, prefix: '$' },
