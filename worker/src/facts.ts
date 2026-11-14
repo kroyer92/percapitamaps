@@ -1,6 +1,6 @@
 // Deterministic facts builder. Every number a video may say or show is computed here,
 // formatted once, and handed to the language model as the only numbers it may use.
-import { HIGH_END, type CatalogEntry } from './data/catalog.js';
+import { BASELINE, HIGH_END, type CatalogEntry } from './data/catalog.js';
 import { fetchSeries, type Series } from './data/fetch.js';
 import { ANCHORS, countryName } from './data/countries.js';
 import type { Format } from './config.js';
@@ -20,7 +20,7 @@ export interface Facts {
   source_url: string;
   license: string;
   ranking: RankRow[];
-  ranking_note?: string; // what #1 means when the highest value is the "bad" end (Gini)
+  ranking_note?: string; // how to read the ranking: #1 is the "bad" end (Gini), or one country is the baseline (price level vs US)
   world_median: string;
   // Set when several countries share the lowest value (nuclear power: most countries at 0%). Then no
   // single country is "last", and when at least half of them share it, the median says nothing.
@@ -126,6 +126,15 @@ export interface BuildInput {
   format: Format;
 }
 
+// What the writer and critic are told about how to read the ranking, when it needs saying.
+function rankingNote(id: string): string | undefined {
+  const notes: string[] = [];
+  if (HIGH_END[id]) notes.push(`#1 is ${HIGH_END[id].means}. Never call the top of this ranking the most equal or fairest.`);
+  const b = BASELINE[id];
+  if (b) notes.push(`Every value is measured against ${b.name}, which is ${b.value} by definition. It is the yardstick, not a ranked country: it is left out of the ranking, so never give it a rank or call it #N; you may only say it is the ${b.value} baseline.`);
+  return notes.length ? notes.join(' ') : undefined;
+}
+
 export function buildFacts({ ds, series, population, format }: BuildInput): Facts {
   // Latest population per country, used to drop micro-territories from rankings.
   const pop = new Map<string, number>();
@@ -134,7 +143,8 @@ export function buildFacts({ ds, series, population, format }: BuildInput): Fact
     pop.set(iso, years.get(latest)!);
   }
   const big = new Set([...pop.entries()].filter(([, p]) => p >= MIN_POPULATION).map(([iso]) => iso));
-  const allowed = new Set([...series.values.keys()].filter((iso) => big.has(iso)));
+  const base = BASELINE[ds.id];
+  const allowed = new Set([...series.values.keys()].filter((iso) => big.has(iso) && iso !== base?.iso3));
 
   const { year } = pickYear(series.values, allowed, ds.minCountries ?? 100);
   if (!isFinite(year)) throw new Error(`No usable year for ${ds.id}`);
@@ -171,7 +181,7 @@ export function buildFacts({ ds, series, population, format }: BuildInput): Fact
     source_url: ds.source_url ?? series.url,
     license: ds.license,
     ranking,
-    ranking_note: HIGH_END[ds.id] ? `#1 is ${HIGH_END[ds.id].means}. Never call the top of this ranking the most equal or fairest.` : undefined,
+    ranking_note: rankingNote(ds.id),
     world_median: formatValue(med, ds),
     bottom_tie: bottomTieOf(ranking),
     top_vs_median: ranking[0] ? ratioText(ranking[0].value, med) : undefined,
