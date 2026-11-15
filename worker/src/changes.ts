@@ -13,6 +13,7 @@ export const CHANGES: Change[] = [
   { at: '2026-10-30T12:09:00Z', label: 'Map Reveal opening test (rank strip vs classic)', formats: ['MAP_REVEAL'] },
   { at: '2026-11-06T12:00:00Z', label: 'Per Capita Nation daily census (first version)', formats: ['NATION'] },
   { at: '2026-11-12T12:00:00Z', label: 'One-text opening (headline is the spoken hook)', formats: ['COUNTDOWN', 'GUESS'] },
+  { at: '2026-11-15T21:00:00Z', label: 'Map Reveal short middle, early reveal (median after the reveal)', formats: ['MAP_REVEAL'] },
 ];
 
 const applies = (c: Change, format: string) => c.formats === 'all' || (c.formats as string[]).includes(format);
