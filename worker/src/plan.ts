@@ -18,6 +18,7 @@ export interface Slot {
   on_screen: string;
   maxWords?: number; // tighter than the role's limit
   check?: (line: string) => string | undefined; // a rule of this slot's own: the problem, if any
+  optional?: boolean; // left out when the video is long enough without it (fitLength)
 }
 
 // "the United States", "the Netherlands"; plain names otherwise.
@@ -272,9 +273,18 @@ export function planFor(format: Format, question: string, f: Facts, opening?: Op
       opening ? anchorHookSlot(opening, question, f) : hookSlot(c, 'map_fill'),
       // The rank strip already opens on a famous country, so it never gets the guess beat too.
       config.guessBeat && !opening ? guessSlot(c, 5, (iso) => `zoom_to:${iso}`) : undefined, // never a country the build-up names again
-      medianSlot(c, 'map_fill'),
-      ...contenderSlots(c, 5, (iso) => `highlight:${iso}`),
+      // Short middle, early reveal (15 Nov 2026): 4 of 5 Map Reveals made since 30 Oct were weak on
+      // watch-through (median 47% watched of 36-50 s), so most viewers left before the reveal at
+      // ~80% of the video. The world median now comes after the reveal, and the build-up lines are
+      // at most 10 words. #6 is spare: it stays only when the video would be under ~30 s without it.
+      ...contenderSlots(c, 6, (iso) => `highlight:${iso}`).map((s, i, all): Slot => ({
+        ...s,
+        brief: `${s.brief} At most ${MR_BUILDUP_WORDS} words.`,
+        maxWords: MR_BUILDUP_WORDS,
+        optional: all.length === 5 && i === 0 ? true : undefined,
+      })),
       revealSlot(c),
+      { ...medianSlot(c, 'map_fill'), role: 'closer' }, // after the reveal it may name the #1
       closerSlot(c, 'map_fill'),
     ]);
   }
@@ -408,6 +418,29 @@ export function planFor(format: Format, question: string, f: Facts, opening?: Op
 }
 
 const MAX_WORDS = 14; // the same limit validate.ts checks every beat against
+const MR_BUILDUP_WORDS = 10; // Map Reveal #6 to #2: the middle has to move fast
+
+// Spoken length of a planned script, estimated from the text the voice reads (big numbers rounded,
+// "$" as "dollars"): about 0.071 s per character plus 0.45 s per line, fitted on Kokoro at speed 1.05
+// (am_michael and bm_george, 15 Nov 2026), plus the timeline's lead, gaps, reveal hold and tail.
+export function estimateSeconds(lines: string[], spoken: (s: string) => string = (s) => s): number {
+  const speech = lines.reduce((t, l) => t + 0.071 * spoken(l).length + 0.45, 0);
+  return speech + 0.12 + 0.14 * Math.max(0, lines.length - 1) + 0.3 + 0.5;
+}
+
+// Video style: 28 s minimum. The estimate is off by a second or two, so a spare beat is only left
+// out when the video would still be about 31 s without it.
+export const MIN_SECONDS_WITHOUT_SPARE = 31;
+
+// Drops the optional (spare) beats when the script is long enough without them. Slots and beats
+// stay index-aligned, so later steps (plain-line fallback) still match them up.
+export function fitLength<B extends { vo: string }>(slots: Slot[], beats: B[], spoken?: (s: string) => string): { slots: Slot[]; beats: B[]; dropped: number } {
+  const keep = slots.map((s) => !s.optional);
+  if (keep.every(Boolean)) return { slots, beats, dropped: 0 };
+  const without = beats.filter((_, i) => keep[i]).map((b) => b.vo);
+  if (estimateSeconds(without, spoken) < MIN_SECONDS_WITHOUT_SPARE) return { slots, beats, dropped: 0 };
+  return { slots: slots.filter((_, i) => keep[i]), beats: beats.filter((_, i) => keep[i]), dropped: keep.filter((k) => !k).length };
+}
 
 // Rules for one line. Anything that fails falls back to the slot's template line.
 export function lineProblem(line: unknown, s: Slot, topName: string): string | undefined {

@@ -5,7 +5,8 @@ import { chatJson } from './llm.js';
 import { factsForLlm, type Facts } from './facts.js';
 import * as P from './prompts.js';
 import { HIGH_END } from './data/catalog.js';
-import { planFor, writePlanned, type Slot } from './plan.js';
+import { fitLength, planFor, writePlanned, type Slot } from './plan.js';
+import { speakable } from './voice.js';
 import { spokenName, type Opening } from './opening.js';
 import { findCountries } from './comment-draft.js';
 import { allowedNumbers, checkScript, isMinor, type Filler, checkText, isBanned, numbersIn, spoils, wordCount, type Script, type Spoiler } from './validate.js';
@@ -187,11 +188,17 @@ export async function generateContent(opts: {
     // The planned writer: the code fixes the story, the model writes the lines. A format the
     // code can't plan (missing facts) falls back to asking the model for the whole script.
     let script: Script;
+    let roundSlots = slots; // the plan minus any spare beat left out for length
     if (slots) {
       // Slot numbers are computed from the facts (e.g. two groups added up), so they are allowed too.
       for (const sl of slots) for (const n of sl.numbers) for (const x of numbersIn(n)) allowed.add(x);
       const names = [...facts.ranking.map((r) => r.name), ...(opening ? [spokenName(opening.iso)] : [])];
       script = await writePlanned(system, slots, spoiler?.name ?? '', fixHint, onStep, opts.recentLines, names, facts.unit);
+      // A spare beat (Map Reveal #6) stays only when the video would be too short without it.
+      const fit = fitLength(slots, script.beats, speakable);
+      script.beats = fit.beats;
+      roundSlots = fit.slots;
+      if (fit.dropped) onStep(`Left out ${fit.dropped} spare beat: the video is long enough without it`);
       // The plan sets the length, so only real problems (numbers, codes) stop a planned script.
       // No fillers: padding a planned script added 3 extra rank lines and pushed job #16 to 63 s.
       const left = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, [], tiedNames)
@@ -244,11 +251,11 @@ export async function generateContent(opts: {
     onStep('Fact-checking');
     const critic = await chatJson<Critic>({ temperature: 0.1, system, user: P.criticUser(JSON.stringify(script.beats), JSON.stringify(pk)) });
     trustCodeOnNumbers(critic, script, pk, allowed);
-    if (critic.verdict !== 'pass' && round === 1 && slots) {
+    if (critic.verdict !== 'pass' && round === 1 && roundSlots) {
       // Second fail on a planned script: swap the flagged lines for the plan's plain lines, which
       // are built from the facts in code, instead of sending the topic to dead letter.
       onStep(`Critic failed again; using plain lines for: ${critic.issues.map((i) => i.beat ?? 'packaging').join(', ')}`);
-      usePlainLines(critic, script, slots, pk, question);
+      usePlainLines(critic, script, roundSlots, pk, question);
       oneText();
     }
     if (critic.verdict === 'pass') {
