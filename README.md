@@ -262,10 +262,12 @@ gives the exact fix once a day, and one broken or deleted Reel never hides the o
   then the US (or the world median) to compare, no final full stop. A country missing from the
   data gets "isn't in this 2024 data", never a guess. Try it on the server:
   `docker compose exec render-worker npm run comments-try -- wb_100_dollars "What about Vietnam?"`
-- **Never the answer.** Every format except SCALE is a quiz, so a reply never names the top 3
-  countries or their rank or value (a commenter who names one gets "Iceland makes the top 3").
-  The model never sees them, and a model reply that names them or talks about "highest" is
-  thrown away.
+- **Never volunteer the answer, never dodge it.** Every format except SCALE is a quiz, so a reply
+  never names a top-3 country the viewer didn't name. A country the viewer names is always
+  answered plainly with its real rank and value, even the winner: "China" under the wheat video
+  gets "Spot on! Same Our World in Data data (2024): China is #1 of 120 at 140.1 million tonnes a
+  year…". The model never sees the hidden top 3, and a model reply that names them or talks about
+  "highest" is thrown away.
 - **Slang and confusion.** Short forms are written out before anything reads the comment (fym,
   wdym = "what do you mean", idk, ngl, tbh…), so they are never taken for a name. "What do you
   mean by index points", "what is HDI" or "I'm so confused" get a plain explanation of what the
