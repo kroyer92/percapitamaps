@@ -130,8 +130,10 @@ const lowerFirst = (s: string) => (/^[A-Z][a-z]/.test(s) && !/^[A-Z][a-z]+ [A-Z]
 const finish = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/[.]+$/, ''); // Niko leaves off the final full stop
 
 // The top of the ranking is the payoff of the quiz Shorts ("which country ranks highest?"), and
-// people read the comments before the video ends. A reply never names these countries or their
-// rank or value. SCALE videos are not quizzes, so nothing is hidden there.
+// people read the comments before the video ends. A reply never volunteers these countries or their
+// rank or value. A country the viewer names themselves is always answered plainly, even the winner:
+// "China" under the wheat video gets "China is #1", never a dodge. SCALE videos are not quizzes, so
+// nothing is hidden there.
 export const HIDDEN_TOP = 3;
 const hiddenRows = (facts: Facts, hide: boolean) => (hide ? facts.ranking.filter((r) => r.rank <= HIDDEN_TOP) : []);
 
@@ -146,9 +148,9 @@ export function countryReply(facts: Facts, u: Unit, isos: string[], opener: stri
   const n = facts.countries_count || facts.ranking.length;
   const src = `Same ${shortSource(u.sourceName)} data (${facts.year_text})`;
   const parts: string[] = [];
-  const secret = new Set(hiddenRows(facts, hide).map((r) => r.iso3));
-  const top = rows.filter((r) => secret.has(r.iso3)).map((r) => r.name);
-  const shown = rows.filter((r) => !secret.has(r.iso3)).sort((a, b) => a.rank - b.rank).slice(0, 4); // highest first, as in Niko's reply
+  // Only the top countries the viewer did NOT name stay secret.
+  const secret = new Set(hiddenRows(facts, hide).map((r) => r.iso3).filter((iso) => !isos.includes(iso)));
+  const shown = rows.sort((a, b) => a.rank - b.rank).slice(0, 4); // highest first, as in Niko's reply
   // Inside a shared lowest value (most countries at 0% nuclear) a rank number means nothing.
   const tie = tieOf(facts);
   const tied = (r: RankRow) => !!tie && r.display === tie.display;
@@ -156,16 +158,17 @@ export function countryReply(facts: Facts, u: Unit, isos: string[], opener: stri
     const r = shown[0];
     parts.push(tied(r)
       ? `${src}: ${r.name} is one of ${tie!.count} countries at ${valueText(r, u)}`
-      : `${src}: ${r.name} is ${ordinal(r.rank)} highest of ${n} at ${valueText(r, u)}`);
+      : r.rank === 1
+        ? `${src}: ${r.name} is #1 of ${n} at ${valueText(r, u)}`
+        : `${src}: ${r.name} is ${ordinal(r.rank)} highest of ${n} at ${valueText(r, u)}`);
   } else if (shown.length > 1) {
     const items = shown.map((r, i) => `${r.name} ${tied(r) ? '' : `${ordinal(r.rank)} `}at ${i === 0 ? valueText(r, u) : r.display}`);
     parts.push(`${src}, out of ${n} countries: ${listJoin(items)}`);
   }
-  if (top.length) parts.push(`${listJoin(top)} ${top.length > 1 ? 'make' : 'makes'} the top ${HIDDEN_TOP}`);
   if (missing.length) parts.push(`${listJoin(missing.slice(0, 3))} ${missing.length > 1 ? "aren't" : "isn't"} in this ${facts.year_text} data`);
-  if (shown.length || top.length) {
+  if (shown.length) {
     const usa = facts.ranking.find((r) => r.iso3 === 'USA');
-    if (usa && !isos.includes('USA') && !secret.has('USA') && !tied(usa)) parts.push(`The US is ${ordinal(usa.rank)} at ${usa.display}`);
+    if (usa && !isos.includes('USA') && !secret.has('USA') && !tied(usa)) parts.push(`The US is ${ordinal(usa.rank)} at ${valueText(usa, u)}`);
     else if (tieOf(facts)?.median_at_floor) parts.push(`Only ${tieOf(facts)!.above} of ${n} countries are above ${tieOf(facts)!.display}`);
     else parts.push(`The world median is ${facts.world_median}`);
   }
@@ -345,7 +348,8 @@ export function draftFor(text: string, facts: Facts | undefined, u: Unit | undef
   // "Fym by index points I'm so confused": explain the number in plain words, from fixed text.
   if (meaning && !isos.length) return { kind, countries: isos, reply: meaningReply(facts, u), action: 'Reply with this' };
   if (isos.length) {
-    const opener = openerFor(kind, text, isos.length);
+    const winner = facts.ranking.find((r) => r.rank === 1)?.iso3;
+    const opener = openerFor(kind, text, isos.length, !!winner && isos.includes(winner));
     const reply = countryReply(facts, u, isos, opener, hide);
     if (reply) return { kind, countries: isos, reply, action: 'Reply with this' };
   }
@@ -360,11 +364,13 @@ export function draftFor(text: string, facts: Facts | undefined, u: Unit | undef
 }
 
 // A short friendly opener, as in Niko's replies.
-export function openerFor(kind: CommentKind, text: string, countries: number): string {
+// `namesWinner`: the comment names the #1 country, so a guess gets "Spot on!".
+export function openerFor(kind: CommentKind, text: string, countries: number, namesWinner = false): string {
   if (kind === 'question') return 'Good question!';
   if (kind === 'correction') return 'Thanks for checking!';
   if (kind === 'praise') return 'Thanks!';
   const pick = /\b(what|how) about\b|\bguess|\bpick|\bmy (vote|bet)\b|\bi (say|think)\b/i.test(text) || text.trim().split(/\s+/).length <= 4;
+  if (pick && namesWinner) return 'Spot on!';
   return pick ? (countries > 1 ? 'Good picks!' : 'Good pick!') : 'Thanks for watching!';
 }
 
