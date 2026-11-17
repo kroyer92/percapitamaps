@@ -16,7 +16,8 @@
     "thumb": "tsx src/cli/thumb.ts",
     "typecheck": "tsc --noEmit",
     "seed-sql": "tsx src/cli/seed-sql.ts",
-    "comments-try": "tsx src/cli/comments-try.ts"
+    "comments-try": "tsx src/cli/comments-try.ts",
+    "telegram-check": "tsx src/cli/telegram-check.ts"
   },
   "dependencies": {
     "@fontsource/inter": "5.2.8",
