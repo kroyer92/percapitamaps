@@ -238,7 +238,8 @@ export async function produceOne(skips = 0, retry = 0): Promise<number | undefin
   } catch (e: any) {
     const human = e instanceof NeedsHuman;
     // Rendered and checked fine, only the Telegram preview failed: keep the video, send it again.
-    if (stage.now === 'sending the preview' && isTemporary(e)) {
+    // Any error counts here, not just network ones: the video passed QA, so the topic is not the problem.
+    if (stage.now === 'sending the preview') {
       await alert(`Job #${id} (${topic.question}) is made, but sending the preview failed: ${e.message}\nNothing to do: I'll send it again in 5 minutes.`);
       retryPreviewLater(id, 1);
       return id;
@@ -336,7 +337,7 @@ export async function sendPreview(id: number): Promise<void> {
     `<b>Title:</b> ${esc(job.packaging.title)}`,
     `<b>Why this video:</b> ${esc(topic.trend_link ? `rides "${topic.trend_link}"` : topic.source === 'launch' ? 'launch concept' : topic.source === 'followup' ? 'follow-up to a winner' : 'evergreen angle')}${topic.expected_twist ? ` · ${esc(topic.expected_twist)}` : ''}`,
     `<b>Source:</b> ${esc(job.facts.source_line)}`,
-    qaSummary(job.qa!),
+    esc(qaSummary(job.qa!)),
   ];
   const messageId = await sendVideo(job.video_path!, lines.join('\n'), previewKeyboard(job));
   if (messageId) await q('UPDATE jobs SET telegram_message_id = $2 WHERE id = $1', [id, messageId]);
@@ -367,6 +368,35 @@ export async function swapHook(id: number, index: number): Promise<void> {
     [id, script, index, hook.type, toClassic ? null : job.opening]);
   await say(`🎬 Re-rendering #${id} with hook ${index + 1} (${esc(hook.type)})${toClassic ? ' and the classic opening, outside the opening test' : ''}. About 5 minutes.`);
   await renderAndPreview(id, true);
+}
+
+// Previews lost to Telegram refusing the caption's HTML ("can't parse entities", job #84 on
+// 17 Nov 2026) before the caption was made safe. The video passed QA and is still on disk, so it
+// goes back to waiting for approval, the topic gets its strike back, and the preview is sent again.
+// Runs at start-up; a topic that already has a newer job is left alone, so nothing is made twice.
+export async function resendLostPreviews(): Promise<number[]> {
+  const rows = await q<{ id: number; topic_id: number; video_path: string }>(
+    `SELECT j.id, j.topic_id, j.video_path FROM jobs j JOIN topics t ON t.id = j.topic_id
+     WHERE j.status = 'render_failed' AND j.error ILIKE '%can''t parse entities%'
+       AND j.video_path IS NOT NULL AND (j.qa->>'passed')::boolean IS TRUE
+       AND j.updated_at > now() - interval '14 days' AND t.status IN ('idea','failed')
+       AND NOT EXISTS (SELECT 1 FROM jobs j2 WHERE j2.topic_id = j.topic_id AND j2.id > j.id)
+     ORDER BY j.id`);
+  const sent: number[] = [];
+  for (const r of rows) {
+    if (!(await fs.stat(r.video_path).then(() => true, () => false))) continue;
+    await q(`UPDATE topics SET status = 'producing', fail_count = GREATEST(fail_count - 1, 0), priority = priority + 1 WHERE id = $1`, [r.topic_id]);
+    await q(`UPDATE jobs SET status = 'awaiting_approval', error = NULL, attempts = GREATEST(attempts - 1, 0), updated_at = now() WHERE id = $1`, [r.id]);
+    try {
+      await say(`📨 The preview of #${r.id} failed earlier on a formatting error in the caption. That is fixed, so here it is again. Nothing else to do.`);
+      await sendPreview(r.id);
+      sent.push(r.id);
+    } catch (e: any) {
+      console.error(`[resend ${r.id}]`, e.message);
+      retryPreviewLater(r.id, 1);
+    }
+  }
+  return sent;
 }
 
 export async function cleanupOldRenders(): Promise<void> {

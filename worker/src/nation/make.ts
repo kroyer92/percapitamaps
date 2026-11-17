@@ -167,7 +167,7 @@ async function sendNationPreview(id: number, c: Census, slot?: Date): Promise<vo
     ...(c.result ? [`<b>Vote result:</b> ${esc(c.result.answer)} (${c.result.votes} of ${c.result.total})`] : []),
     `<b>Title:</b> ${esc(job.packaging.title)}`,
     ...(slot ? [`<b>Goes live:</b> ${fmtIn(slot, config.localTz)} your time${auto ? `. It approves itself at ${fmtIn(auto, config.localTz)} unless you press Reject.` : '. Press Approve.'}`] : []),
-    qaSummary(job.qa!),
+    esc(qaSummary(job.qa!)),
   ];
   const keyboard: Keyboard | undefined = slot ? [[{ text: '✅ Approve', callback_data: `ap:${id}` }, { text: '❌ Reject', callback_data: `rj:${id}` }]] : undefined;
   const messageId = await sendVideo(job.video_path!, lines.join('\n'), keyboard);
