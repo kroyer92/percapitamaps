@@ -46,6 +46,13 @@ const EXTRA: Record<string, string> = {
   'belgian': 'BEL', 'hungarian': 'HUN', 'icelandic': 'ISL', 'new zealander': 'NZL', 'estonian': 'EST', 'latvian': 'LVA', 'lithuanian': 'LTU',
   'croatian': 'HRV', 'serbian': 'SRB', 'bulgarian': 'BGR', 'slovak': 'SVK', 'slovenian': 'SVN', 'moroccan': 'MAR', 'algerian': 'DZA',
   'ethiopian': 'ETH', 'ghanaian': 'GHA', 'qatari': 'QAT', 'kuwaiti': 'KWT', 'nepali': 'NPL', 'sri lankan': 'LKA', 'cuban': 'CUB',
+  // Own-language names viewers cheer with ("PILIPINAS 🇵🇭", "Deutschland").
+  'pilipinas': 'PHL', 'pinas': 'PHL', 'pinoy': 'PHL', 'pinay': 'PHL', 'deutschland': 'DEU', 'espana': 'ESP', 'italia': 'ITA', 'brasil': 'BRA',
+  'nippon': 'JPN', 'nihon': 'JPN', 'bharat': 'IND', 'hindustan': 'IND', 'sverige': 'SWE', 'norge': 'NOR', 'danmark': 'DNK', 'suomi': 'FIN',
+  'polska': 'POL', 'hellas': 'GRC', 'magyarorszag': 'HUN', 'hrvatska': 'HRV', 'srbija': 'SRB', 'eesti': 'EST', 'latvija': 'LVA', 'lietuva': 'LTU',
+  'osterreich': 'AUT', 'schweiz': 'CHE', 'suisse': 'CHE', 'belgie': 'BEL', 'nederland': 'NLD', 'ceska': 'CZE', 'cesko': 'CZE', 'slovensko': 'SVK',
+  'rossiya': 'RUS', 'ukraina': 'UKR', 'misr': 'EGY', 'naija': 'NGA', 'aotearoa': 'NZL', 'zhongguo': 'CHN', 'hanguk': 'KOR', 'malaya': 'MYS',
+  'viet nam': 'VNM', 'saudia': 'SAU', 'pakistan zindabad': 'PAK',
 };
 // Codes only count in capitals, so "us" (the pronoun) is never read as the USA.
 const CODES: Record<string, string> = { US: 'USA', USA: 'USA', 'U.S.': 'USA', 'U.S.A.': 'USA', UK: 'GBR', 'U.K.': 'GBR', UAE: 'ARE', DRC: 'COD', KSA: 'SAU', NZ: 'NZL' };
@@ -70,7 +77,24 @@ function aliases(): [string, string][] {
   return aliasList;
 }
 
-export function findCountries(text: string): string[] {
+// Flag emojis are two regional-indicator letters: 🇵🇭 = "PH". England/Scotland/Wales flags are tag
+// sequences on 🏴 and count as the UK.
+export function flagCountries(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/([\u{1F1E6}-\u{1F1FF}])([\u{1F1E6}-\u{1F1FF}])/gu)) {
+    const a2 = String.fromCharCode(m[1].codePointAt(0)! - 0x1f1e6 + 65, m[2].codePointAt(0)! - 0x1f1e6 + 65);
+    const iso = countries.alpha2ToAlpha3(a2 === 'UK' ? 'GB' : a2);
+    if (iso && !out.includes(iso)) out.push(iso);
+  }
+  if (/\u{1F3F4}\u{E0067}\u{E0062}/u.test(text) && !out.includes('GBR')) out.push('GBR');
+  return out;
+}
+
+// "PILIPINASS", "Brazilllll": cheering stretches letters. Doubled letters are squeezed on both sides.
+const squeeze = (s: string) => s.replace(/([a-z])\1+/g, '$1');
+
+// `loose` (viewer comments only): also flag emojis and stretched names. Scripts and QA stay strict.
+export function findCountries(text: string, loose = false): string[] {
   const found: string[] = [];
   const add = (iso: string) => { if (!found.includes(iso)) found.push(iso); };
   for (const [code, iso] of Object.entries(CODES)) {
@@ -92,6 +116,14 @@ export function findCountries(text: string): string[] {
     if (t.includes(poss)) hits.push({ at: t.indexOf(poss), iso });
   }
   for (const h of hits.sort((a, b) => a.at - b.at)) add(h.iso);
+  if (loose) {
+    // Words left over after the exact pass, compared with doubled letters squeezed out.
+    const words = t.split(' ').filter((w) => w.length >= 4 && !w.startsWith('#'));
+    const squeezed = new Map<string, string>();
+    for (const [name, iso] of aliases()) if (!name.includes(' ')) { const k = squeeze(name); if (k.length >= 4 && !squeezed.has(k)) squeezed.set(k, iso); }
+    for (const w of words) { const iso = squeezed.get(squeeze(w)); if (iso) add(iso); }
+    for (const iso of flagCountries(text)) add(iso);
+  }
   return found;
 }
 
@@ -146,7 +178,8 @@ export function countryReply(facts: Facts, u: Unit, isos: string[], opener: stri
   const missing = isos.filter((iso) => !facts.ranking.some((r) => r.iso3 === iso)).map((iso) => countryName(iso));
   if (!rows.length && !missing.length) return undefined;
   const n = facts.countries_count || facts.ranking.length;
-  const src = `Same ${shortSource(u.sourceName)} data (${facts.year_text})`;
+  const name = shortSource(u.sourceName);
+  const src = `Same ${name} ${/\bdata$/i.test(name) ? 'numbers' : 'data'} (${facts.year_text})`;
   const parts: string[] = [];
   // Only the top countries the viewer did NOT name stay secret.
   const secret = new Set(hiddenRows(facts, hide).map((r) => r.iso3).filter((iso) => !isos.includes(iso)));
@@ -335,7 +368,7 @@ export function draftFor(text: string, facts: Facts | undefined, u: Unit | undef
   let kind: CommentKind = KINDS.includes(model?.kind as CommentKind) ? (model!.kind as CommentKind) : guessKind(text);
   if (meaning && (kind === 'other' || kind === 'praise')) kind = 'question';
   const valid = (iso: string) => countries.isValid(iso) || !!facts?.ranking.some((r) => r.iso3 === iso);
-  const isos = [...new Set([...findCountries(text), ...(model?.countries ?? []).map((c) => String(c).toUpperCase()).filter(valid)])];
+  const isos = [...new Set([...findCountries(text, true), ...(model?.countries ?? []).map((c) => String(c).toUpperCase()).filter(valid)])];
   const heart: Draft = { kind, countries: isos, action: 'Heart it. No reply needed.' };
 
   if (kind === 'spam') return { kind, countries: isos, action: 'Spam: remove it (⋮ → Remove). No reply.' };
