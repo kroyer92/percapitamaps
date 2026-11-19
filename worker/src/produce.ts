@@ -426,6 +426,29 @@ export async function redoLongHookFails(): Promise<number[]> {
   return rows.map((r) => r.id);
 }
 
+// Videos the QA gate stopped only for a true peak over -1 dBTP (job #88 on 19 Nov 2026), before the
+// final mix limited true peak itself. The script and voice were fine, so each one is mixed and checked
+// again with the same script and voice. Runs at start-up; one that already has a newer job for its
+// topic, or that is no longer in render_failed, is left alone, so this never loops.
+export async function redoTruePeakFails(): Promise<number[]> {
+  const rows = await q<{ id: number; question: string }>(
+    `SELECT j.id, t.question FROM jobs j JOIN topics t ON t.id = j.topic_id
+     WHERE j.status = 'render_failed' AND j.render IS NOT NULL
+       AND (j.qa->>'passed')::boolean IS FALSE
+       AND j.updated_at > now() - interval '3 days' AND t.status IN ('producing','idea')
+       AND EXISTS (SELECT 1 FROM jsonb_array_elements(j.qa->'checks') c WHERE c->>'status' = 'fail' AND c->>'name' = 'True peak')
+       AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(j.qa->'checks') c WHERE c->>'status' = 'fail' AND c->>'name' <> 'True peak')
+       AND NOT EXISTS (SELECT 1 FROM jobs j2 WHERE j2.topic_id = j.topic_id AND j2.id > j.id)
+     ORDER BY j.id`);
+  for (const r of rows) {
+    await q(`UPDATE jobs SET status = 'rendering', updated_at = now() WHERE id = $1`, [r.id]);
+    await q(`UPDATE topics SET status = 'producing' WHERE id = (SELECT topic_id FROM jobs WHERE id = $1)`, [r.id]);
+    await say(`🔁 Job #${r.id} (${esc(r.question)}) was stopped because the sound peaked too high. The final mix now limits that itself, so I am making it again now. Nothing to do.`);
+    queue.add(`re-mix #${r.id} (true peak)`, async () => { await renderAndPreview(r.id, true); });
+  }
+  return rows.map((r) => r.id);
+}
+
 export async function cleanupOldRenders(): Promise<void> {
   const old = await q<{ id: number }>(
     `SELECT id FROM jobs WHERE status IN ('published','rejected','render_failed','needs_human','dead_letter','test') AND updated_at < now() - interval '14 days' AND video_path IS NOT NULL`);

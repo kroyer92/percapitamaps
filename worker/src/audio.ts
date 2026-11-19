@@ -76,7 +76,7 @@ export async function pickMusic(seed: number): Promise<MusicPick | undefined> {
   }
 }
 
-// Mix voice, music and sound effects, normalise to -14 LUFS (two-pass loudnorm), and mux onto the silent video.
+// Mix voice, music and sound effects, normalise to -14 LUFS with true peak under -1 dBTP, and mux onto the silent video.
 export async function finalMix(video: string, voice: string, music: MusicPick | undefined, seconds: number, out: string, sfx?: string): Promise<void> {
   const dir = path.dirname(out);
   const mix = path.join(dir, `${path.basename(out, path.extname(out))}.mix.wav`);
@@ -96,10 +96,50 @@ export async function finalMix(video: string, voice: string, music: MusicPick | 
   filter += parts.length > 1 ? `;${parts.join('')}amix=inputs=${parts.length}:duration=first:normalize=0[a]` : ';[vo]anull[a]';
   await run('ffmpeg', [...inputs, '-filter_complex', filter, '-map', '[a]', '-t', seconds.toFixed(3), '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', mix]);
 
-  const { stderr } = await run('ffmpeg', ['-hide_banner', '-i', mix, '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json', '-f', 'null', '-']);
-  const m = JSON.parse(stderr.slice(stderr.lastIndexOf('{'), stderr.lastIndexOf('}') + 1));
-  const ln = `loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=${m.input_i}:measured_TP=${m.input_tp}:measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:offset=${m.target_offset}:linear=true`;
-  await run('ffmpeg', ['-y', '-i', video, '-i', mix, '-filter_complex', `[1:a]${ln},aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]`,
-    '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-t', seconds.toFixed(3), out]);
+  await master(video, mix, seconds, out);
   await fs.rm(mix, { force: true });
+}
+
+// Loudness and true peak exactly as the QA gate measures them (EBU R128, oversampled true peak).
+export async function measureLoudness(file: string): Promise<{ I: number; peak: number }> {
+  const { stderr } = await run('ffmpeg', ['-hide_banner', '-nostats', '-i', file, '-filter_complex', 'ebur128=peak=true', '-f', 'null', '-']);
+  const summary = stderr.slice(stderr.lastIndexOf('Summary:'));
+  const I = Number(summary.match(/I:\s+(-?[\d.]+) LUFS/)?.[1]);
+  const raw = summary.match(/Peak:\s+(-?[\d.]+|-inf) dBFS/)?.[1];
+  const peak = raw === '-inf' ? -Infinity : Number(raw);
+  return { I, peak };
+}
+
+const TARGET_I = -14;
+const PEAK_MAX = -1.2; // QA wants under -1 dBTP; 0.2 dB spare
+
+// Gain to -14 LUFS, then a limiter run at 4x the sample rate so it catches the peaks between samples
+// (true peak), then AAC. The finished file is measured the way QA measures it and made again with a
+// lower ceiling or corrected gain until it is in range, so a loud sound effect or the AAC encoder can
+// never push the true peak over -1 dBTP. Two-pass loudnorm did not guarantee that: when the gain it
+// needs would clip, it silently switches to its dynamic mode, whose limiter let job #88 (19 Nov 2026)
+// out at +1 dBTP and the QA gate stopped the video.
+async function master(video: string, mix: string, seconds: number, out: string): Promise<void> {
+  const src = await measureLoudness(mix);
+  let gain = Number.isFinite(src.I) ? TARGET_I - src.I : 0;
+  let ceiling = -2;
+  const miss = (r: { I: number; peak: number }) => (r.peak >= PEAK_MAX ? 100 + r.peak : 0) + (Number.isFinite(r.I) ? Math.abs(r.I - TARGET_I) : 0);
+  let best: { file: string; score: number } | undefined;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    const file = `${out}.try${attempt}.mp4`;
+    const limit = Math.max(0.0625, 10 ** (ceiling / 20)).toFixed(4);
+    const chain = `[1:a]aformat=sample_fmts=fltp,volume=${gain.toFixed(2)}dB,aresample=192000,alimiter=limit=${limit}:attack=5:release=60:level=disabled,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a]`;
+    await run('ffmpeg', ['-y', '-i', video, '-i', mix, '-filter_complex', chain,
+      '-map', '0:v', '-map', '[a]', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-t', seconds.toFixed(3), file]);
+    const got = await measureLoudness(file);
+    const score = miss(got);
+    if (!best || score < best.score) {
+      if (best) await fs.rm(best.file, { force: true });
+      best = { file, score };
+    } else await fs.rm(file, { force: true });
+    if (score <= 0.5) break; // true peak under -1.2 dBTP and within 0.5 LU of -14
+    if (got.peak >= PEAK_MAX) ceiling -= got.peak - PEAK_MAX + 0.3;
+    else if (Number.isFinite(got.I)) gain += TARGET_I - got.I;
+  }
+  await fs.rename(best!.file, out);
 }

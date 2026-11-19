@@ -6,7 +6,7 @@ import { config } from './config.js';
 import { applySchema, one, q } from './db.js';
 import { queue } from './lib/queue.js';
 import { deletionResult, mapFixSweep, n8nInstalled, pendingDeletions, replacementUploaded, tick as replaceTick } from './replace.js';
-import { produceOne, cleanupOldRenders, requeueTiedRejects, resendLostPreviews, redoLongHookFails } from './produce.js';
+import { produceOne, cleanupOldRenders, requeueTiedRejects, resendLostPreviews, redoLongHookFails, redoTruePeakFails } from './produce.js';
 import { discover } from './discover.js';
 import { instagramDue, linkVideo } from './publish.js';
 import { dueSnapshots, storeChannel, storeSnapshot, weeklyReport } from './analytics.js';
@@ -231,4 +231,6 @@ app.listen(config.port, async () => {
   await resendLostPreviews().catch((e) => console.error('[resend previews]', e.message));
   // Videos stopped by a hook over the word limit before that self-repaired (job #87).
   await redoLongHookFails().catch((e) => console.error('[redo long hooks]', e.message));
+  // Videos stopped by the QA gate on true peak before the mix limited it itself (job #88).
+  await redoTruePeakFails().catch((e) => console.error('[redo true peak]', e.message));
 });
