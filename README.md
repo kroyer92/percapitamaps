@@ -199,9 +199,9 @@ download copy under `public/longform/` (deleted after 14 days; renders after 30)
 
 **Its own scorecard** (`longform/score.ts`): WF5 measures each long-form as job `L<n>` at 72 hours,
 7 days and 28 days after it goes public (the due list puts them first; n8n passes the id through
-unchanged). Once a window has settled (3 days after it, as Analytics lags), Telegram gets: still
-watching at 0:30 (target 60%), how much of the video an average view covers (target 30%), watch
-hours, and the chapter that loses viewers fastest, with a **Your move** line. No single video changes
+unchanged). Once a window has settled (3 days after it, as Analytics lags), it is scored silently:
+still watching at 0:30 (target 60%), how much of the video an average view covers (target 30%), watch
+hours, and the chapter that loses viewers fastest. Nothing goes to Telegram per video. No single video changes
 anything: the Sunday report has a "Weekly long video" section, and once 3 quiz videos have 7-day
 numbers it compares them with the classic ones. Only if the classic kept viewers clearly better (5
 points on both numbers) does it offer a button, "Use the classic long-form", which switches the style.
@@ -216,12 +216,14 @@ the worker adds the Instagram Reel's insights, and `worker/src/scorecard.ts` sco
   (average % viewed), shares and subs per 1,000 engaged views; on Instagram skip rate, watch time
   and share rate. Bands follow the per-video metric targets doc until 10 videos have the same
   snapshot, then the channel's own bottom 20% / median / top 20%.
-- **Telegram message per snapshot:** Winner / Average / Loser / Too early, the steepest 2-second
-  drop in the retention curve and the script beat on screen then, why it scored that way, and a
-  closing **Your move** line: the exact action, or "nothing for you to do" with the reason and the
-  date of the next scorecard. One video never changes the recipe, and nothing touches what a running
-  test measures. Winners get 2 follow-ups queued automatically (once per video).
-- **Sunday report** opens with **Your move** (exact /link lines, a tap, or "Nothing this week"),
+- **No Telegram message per snapshot** (since 19 Nov 2026): every scorecard said "nothing for you
+  to do", so the verdict (Above our usual / Our usual / Below our usual / Too early), the drop point
+  and the reasons are only saved: on the Studio wall, in `/videos` and in the weekly export that
+  Claude's Sunday review reads. One video never changes the recipe, and nothing touches what a running
+  test measures. Winners still get 2 follow-ups queued automatically (once per video); their previews
+  come to Telegram as usual.
+- **Sunday report** goes to Telegram only when there is a **Your move** (exact /link lines or a tap);
+  a week with nothing to do stays silent. It holds **Your move**,
   **Done for you** and **Waiting on data**, then a channel call: the first funnel stage most
   measured videos fail (5+ videos with 300+ views), which either waits on the running test or says
   to forward the report to Claude for the code change.

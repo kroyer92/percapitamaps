@@ -1,5 +1,5 @@
 // Scores one analytics snapshot: a grade per stage (stay, finish, spread, convert), a verdict,
-// where in the video viewers left, why, and what has to happen next (nextStep). The bands are the
+// where in the video viewers left and why. Nothing here goes to Telegram; the weekly export carries it. The bands are the
 // ones in the "per-video metric targets" doc; once 10 videos have the same snapshot, the channel's own spread replaces them.
 import type { Beat } from './validate.js';
 import type { VoiceClip } from './voice.js';
@@ -157,8 +157,7 @@ export function biggestDrop(curve: [number, number][] | null, v: VideoInfo): Dro
   return { ...best, beat, line: words.slice(0, 7).join(' ') + (words.length > 7 ? '…' : ''), kind };
 }
 
-// What went wrong, in plain words. These describe the video; they are not jobs for anyone; the
-// action line (nextStep) says what, if anything, has to happen.
+// What went wrong, in plain words. These describe the video; they are not jobs for anyone.
 function whyFor(g: Score['grades'], drop: Drop | undefined): string[] {
   const bad = (x?: Grade) => x === 'kill' || x === 'weak';
   const out: string[] = [];
@@ -175,43 +174,6 @@ function whyFor(g: Score['grades'], drop: Drop | undefined): string[] {
 }
 
 export const STAGE_NAME: Record<string, string> = { stay: 'the first second (stayed)', finish: 'watch-through', shares: 'shares', subs: 'subscribers' };
-
-// Everything nextStep needs besides the score itself.
-export interface StepContext {
-  win: string;
-  next?: { win: string; at: string }; // the next scorecard for this video, if any
-  followups?: 'queued' | 'already';
-  openingTest?: { decided: boolean; readBy: string | null }; // the Map Reveal opening test
-}
-
-// The last line of every scorecard: the verdict turned into what has to happen, which is almost
-// always nothing on Niko's side. One video never changes the recipe: topic luck moves a single
-// video more than any change does, and the opening test must run untouched until it is read.
-export function nextStep(sc: Score, ctx: StepContext): string {
-  const bad = (x?: Grade) => x === 'kill' || x === 'weak';
-  const nextCard = ctx.next ? ` Next scorecard for it: ${ctx.next.win}, around ${ctx.next.at}.` : '';
-  if (sc.verdict === 'winner') {
-    return ctx.followups === 'already'
-      ? `✅ Nothing for you to do. Its 2 follow-ups are already queued.${nextCard}`
-      : `✅ Nothing for you to do. I'm queuing 2 follow-ups in the same story shape; approve their previews as usual.${nextCard}`;
-  }
-  if (sc.verdict === 'early') {
-    return `⏳ Nothing for you to do. ${sc.values.views ?? 0} views is too few to judge (${MIN_SAMPLE} needed).${nextCard}`;
-  }
-  const parts = ['✅ Nothing for you to do.'];
-  if (bad(sc.grades.stay)) {
-    const t = ctx.openingTest;
-    parts.push(t && !t.decided
-      ? `The weak first second is the known channel-wide problem, and the Map Reveal opening test is the fix being tried. Nothing changes until it is read${t.readBy ? ` (around ${t.readBy})` : ''}; changing things now would spoil it.`
-      : 'The weak first second is the known channel-wide problem; the Sunday report says when there is enough data for the next fix.');
-  } else if (sc.verdict === 'average' && !['finish', 'shares', 'subs'].some((k) => bad(sc.grades[k]))) {
-    parts.push('It did about as well as our usual.');
-  } else {
-    parts.push('One video is too little to change anything on. If the same weakness shows across videos, the Sunday report says so and what changes.');
-  }
-  if (sc.verdict === 'loser') parts.push("Leave it up: don't delete or re-upload it.");
-  return parts.join(' ') + nextCard;
-}
 
 export function score(s: Snapshot, v: VideoInfo, peers: Snapshot[]): Score {
   const values = valuesOf(s, v.seconds);

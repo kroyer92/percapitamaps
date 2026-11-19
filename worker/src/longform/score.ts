@@ -8,10 +8,9 @@
 // The targets are common rules of thumb for long videos (vidIQ's retention benchmarks), not
 // YouTube's numbers. No single video changes the recipe: the Sunday report compares the game style
 // with the classic one once 3 game-style videos have 7-day numbers (longformReport).
-import { config } from '../config.js';
 import { getSetting, q, setSetting } from '../db.js';
 import { parseVideoId } from '../publish.js';
-import { esc, say, type Keyboard } from '../telegram.js';
+import { esc, type Keyboard } from '../telegram.js';
 
 export type LongStyle = 'game' | 'classic';
 export const STYLE_NAME: Record<LongStyle, string> = { game: 'game style', classic: 'classic style' };
@@ -25,7 +24,6 @@ const MIN_VIEWS = 30; // fewer views than this say nothing yet
 const GAME_VIDEOS_FOR_CALL = 3;
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
-const day = (d: Date | number) => new Intl.DateTimeFormat('en-GB', { timeZone: config.localTz, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(d));
 const settleAt = (pub: number, hours: number) => pub + hours * 3600_000 + LAG_DAYS * 86_400_000;
 const mmss = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
 const pct = (x?: number) => (x === undefined ? '–' : `${Math.round(x)}%`);
@@ -138,26 +136,6 @@ export function scoreLong(
   return out;
 }
 
-const VERDICT: Record<LongScore['verdict'], string> = { on_target: '🏆 On target', mixed: '🙂 Mixed', below: '🔻 Below target', early: '⏳ Too early' };
-
-// The Telegram scorecard is only the verdict and what to do; the watch numbers, the chapter that
-// loses viewers and the curve stay in the weekly export for Claude's Sunday review.
-export function longScoreText(lf: { n: number; title?: string | null; style: string }, win: string, sc: LongScore, next?: { win: string; at: string }): string {
-  const reason = sc.verdict === 'early'
-    ? `${sc.views.toLocaleString('en-US')} views so far, too few to judge.`
-    : sc.verdict === 'on_target' ? 'viewers stay as long as we aim for.' : sc.verdict === 'mixed' ? 'viewers stay close to what we aim for, but not all the way.' : 'viewers leave sooner than we aim for.';
-  const later = next ? ` The ${next.win} scorecard comes around ${next.at}.` : '';
-  return [
-    `📊 <b>Long-form #${lf.n} · ${win}</b> · ${esc(lf.title ?? '')} · ${STYLE_NAME[lf.style as LongStyle] ?? esc(lf.style)}`,
-    `${VERDICT[sc.verdict]}: ${reason} ${sc.views.toLocaleString('en-US')} views.`,
-    `<b>Your move:</b> ${sc.verdict === 'early'
-      ? `✅ Nothing.${later}`
-      : `✅ Nothing. One video is not enough to change the long-form; the Sunday report says when there is a call to make.${later}`}`,
-    // YouTube API Developer Policies III.E.4.h: derived numbers must be marked as not from YouTube.
-    '<i>Views are from YouTube; the verdict is worked out by this tool.</i>',
-  ].join('\n');
-}
-
 // ---------- WF5 delivered a snapshot for "L<n>" (analytics.ts parses the body and hands it over)
 export async function storeLongformSnapshot(x: {
   n: number; win: string; body: any; ytPublished?: string;
@@ -176,8 +154,6 @@ export async function storeLongformSnapshot(x: {
   }
   const pub = +new Date(lf.publish_at);
   const hours = WINDOWS.find((w) => w.win === x.win)?.hours ?? 0;
-  const prev = (await q<{ avg_view_pct: number | null; score: LongScore | null }>('SELECT avg_view_pct, score FROM longform_metrics WHERE n = $1 AND win = $2', [x.n, x.win]))[0];
-  const told = !!prev && prev.avg_view_pct !== null && !prev.score?.provisional;
   await q(
     `INSERT INTO longform_metrics (n, win, views, avg_view_pct, avg_view_sec, likes, shares, comments, subs_gained, raw, curve)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
@@ -188,13 +164,8 @@ export async function storeLongformSnapshot(x: {
   const sc = scoreLong(x, Number(lf.seconds ?? 0), lf.chapters ?? []);
   if (Date.now() < settleAt(pub, hours)) sc.provisional = true;
   await q('UPDATE longform_metrics SET score = $3 WHERE n = $1 AND win = $2', [x.n, x.win, sc]);
-  // Analytics hasn't caught up yet: the next WF5 run fetches this window again.
-  if (x.avg_view_pct === null && Date.now() < pub + (hours + RETRY_HOURS) * 3600_000) return;
-  if (sc.provisional || told) return; // early numbers are kept quiet; a later fetch only corrects
-  const i = WINDOWS.findIndex((w) => w.win === x.win);
-  const nextWin = WINDOWS[i + 1];
-  const next = nextWin ? { win: nextWin.win, at: day(Math.max(settleAt(pub, nextWin.hours), Date.now() + 86_400_000)) } : undefined;
-  await say(longScoreText({ n: x.n, title: lf.title, style: lf.style }, x.win, sc, next));
+  // No Telegram scorecard: one long-form never needs anything from Niko. The verdict is saved for
+  // the Sunday report (which offers the one button when a style call is due) and Claude's review.
 }
 
 // ---------- The Sunday report's long-form section and its call: keep the game style, or go back.

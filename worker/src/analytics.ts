@@ -1,14 +1,14 @@
 // WF5's data: which videos need a 24h / 72h / 7d snapshot, storing what n8n fetched from the
-// YouTube APIs (plus the Reel's Instagram insights), the scorecard message for each snapshot,
-// and the Sunday report with auto-tuning.
+// YouTube APIs (plus the Reel's Instagram insights), the silent score for each snapshot, and the
+// Sunday report with auto-tuning (sent to Telegram only when there is something to do).
 import { config, FORMAT_NAMES, type Format } from './config.js';
 import { getSetting, q, setSetting } from './db.js';
 import { esc, say } from './telegram.js';
 import { ig, igToken } from './publish.js';
-import { score, mmss, nextStep, quantile, viralLine, VIRAL_VIEWS, MIN_SAMPLE, STAGE_NAME, type Grade, type IgInsights, type Score, type Snapshot, type StepContext, type VideoInfo } from './scorecard.js';
+import { score, VIRAL_VIEWS, MIN_SAMPLE, STAGE_NAME, type Grade, type IgInsights, type Score, type Snapshot, type VideoInfo } from './scorecard.js';
 import { autoFollowup, hasFollowups, queueFollowup } from './followups.js';
 import type { Keyboard } from './telegram.js';
-import { isCurrent, versionOf, versionName } from './changes.js';
+import { isCurrent } from './changes.js';
 import { autoTune, getTune } from './tune.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -26,7 +26,7 @@ const WINDOWS: { win: string; hours: number }[] = [
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 // "Mon 16 Nov" in Niko's time zone.
 const day = (d: Date | number) => new Intl.DateTimeFormat('en-GB', { timeZone: config.localTz, weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(d));
-const ANALYTICS_LAG_DAYS = 3; // YouTube Analytics runs 2–3 days behind, so a window's scorecard comes about this much later
+const ANALYTICS_LAG_DAYS = 3; // YouTube Analytics runs 2–3 days behind, so a window is scored about this much later
 
 // YouTube Analytics lags 2–3 days behind Studio, so a snapshot taken on time often has no engaged
 // views yet. Such a snapshot is fetched again every run until the data arrives (or RETRY_HOURS run
@@ -56,7 +56,7 @@ export async function dueSnapshots() {
       const at = pub + w.hours * 3600_000;
       if (at > Date.now()) break;
       const m = have.get(`${j.id}:${w.win}`);
-      // 12 h past RETRY_HOURS leaves room for the final run that sends the scorecard anyway.
+      // 12 h past RETRY_HOURS leaves room for the final run that scores it anyway.
       const waiting = m && !m.ready && Date.now() < at + (RETRY_HOURS + 12) * 3600_000;
       const unsettled = m && +new Date(m.captured_at) < settleAt(pub, w.hours);
       const retry = (waiting || unsettled) && Date.now() - +new Date(m.captured_at) > 5 * 3600_000;
@@ -99,7 +99,7 @@ export async function storeSnapshot(body: any): Promise<void> {
   const stats = body.stats?.items?.[0]?.statistics ?? body.stats ?? {};
   const a = analyticsRow(body.analytics);
   const num = (v: any) => (v === undefined || v === null || isNaN(Number(v)) ? null : Number(v));
-  // A weekly long-form ("L<n>"): its scorecard is told only once the window has settled, which is
+  // A weekly long-form ("L<n>"): it is scored once the window has settled, which is
   // always days after the window ended, so Analytics' numbers (ending on the window's last day) lead.
   const long = /^L(\d+)$/i.exec(String(body.job_id ?? ''));
   if (long) {
@@ -164,7 +164,7 @@ export async function storeSnapshot(body: any): Promise<void> {
       ig,
     ],
   );
-  await scoreAndTell(jobId, body.win, pub ? +new Date(pub) + (hours + RETRY_HOURS) * 3600_000 : 0, late, pub ? settleAt(pub, hours) : 0, told);
+  await scoreSnapshot(jobId, body.win, pub ? +new Date(pub) + (hours + RETRY_HOURS) * 3600_000 : 0, pub ? settleAt(pub, hours) : 0, told);
 }
 
 // YouTube Analytics' audience retention report: rows of [elapsedVideoTimeRatio, audienceWatchRatio].
@@ -211,10 +211,9 @@ async function igInsights(jobId: number): Promise<IgInsights | null> {
 
 type JobInfo = { id: number; title: string | null; hook_type: string | null; opening: string | null; script: { beats: Beat[] } | null; render: { clips: VoiceClip[]; seconds: number } | null; youtube_video_id: string };
 
-// Scores a fresh snapshot against the bands and the channel's other videos, saves the verdict and
-// tells you in Telegram what it means and what (if anything) has to happen. Winners get their
-// follow-ups queued automatically.
-async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = false, settledAt = 0, told = false): Promise<void> {
+// Scores a fresh snapshot against the bands and the channel's other videos and saves the verdict.
+// Nothing goes to Telegram: the verdict never needs Niko. Winners get their follow-ups queued.
+async function scoreSnapshot(jobId: number, win: string, retryUntil = 0, settledAt = 0, told = false): Promise<void> {
   const job = (await q<JobInfo & { format: string; published_at: Date | null; created_at: Date }>(`SELECT id, packaging->>'title' AS title, hook_type, opening, format, published_at, created_at, script, render, youtube_video_id FROM jobs WHERE id = $1`, [jobId]))[0];
   const snap = (await q<Snapshot>('SELECT * FROM metrics WHERE job_id = $1 AND win = $2', [jobId, win]))[0];
   if (!job || !snap) return;
@@ -232,44 +231,21 @@ async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = f
     return;
   }
   if (provisional) {
-    office.finished('analyst', `#${jobId} at ${win}: early numbers saved; the scorecard follows once YouTube Analytics has caught up`, jobId);
+    office.finished('analyst', `#${jobId} at ${win}: early numbers saved; scored for real once YouTube Analytics has caught up`, jobId);
     return;
   }
   if (told) {
     office.finished('analyst', `#${jobId} at ${win}: corrected with complete Analytics numbers (${VERDICT[sc.verdict]})`, jobId);
     return;
   }
-  office.finished('analyst', `#${jobId} at ${win}: ${VERDICT[sc.verdict]}, ${sc.reason}`, jobId);
-  const ctx: StepContext = { win };
-  const i = WINDOWS.findIndex((w) => w.win === win);
-  const nextWin = WINDOWS[i + 1];
-  if (nextWin && job.published_at) {
-    const at = +new Date(job.published_at) + nextWin.hours * 3600_000 + ANALYTICS_LAG_DAYS * 86_400_000;
-    ctx.next = { win: nextWin.win, at: day(Math.max(at, Date.now() + 86_400_000)) };
-  }
-  if (sc.verdict === 'winner') ctx.followups = await autoFollowup(jobId).catch(() => undefined);
-  const t = await openingTest().catch(() => undefined);
-  if (t) ctx.openingTest = { decided: !!t.decided, readBy: t.readBy };
-  const made = isCurrent(job.format, job.created_at) ? null : `Made with an earlier version (${versionName(versionOf(job.format, job.created_at))}), so it shows how that version did, not what to change now.`;
-  await say(scoreText(job, win, snap, sc, late, [made, nextStep(sc, ctx)].filter(Boolean).join(' ')));
+  // Per-video scorecards no longer go to Telegram: none of them ever had anything for Niko to do.
+  // The verdict is saved (above), shown on the Studio wall, read by Claude's Sunday review from the
+  // export, and a video above our usual still gets its follow-ups queued here.
+  if (sc.verdict === 'winner') await autoFollowup(jobId).catch(() => undefined);
+  office.finished('analyst', `#${jobId} at ${win}: ${VERDICT[sc.verdict]}, ${sc.reason} (no message: nothing to do)`, jobId);
 }
 
 const VERDICT: Record<Score['verdict'], string> = { winner: '⭐ Above our usual', average: '🙂 Our usual', loser: '🔻 Below our usual', early: '⏳ Too early' };
-
-// The Telegram scorecard is only the verdict and what to do. The grades, drop point and Instagram
-// numbers stay in the database and the weekly export, where Claude's Sunday review reads them:
-// Niko does not interpret numbers, so they don't go to him.
-export function scoreText(job: Pick<JobInfo, 'id' | 'title' | 'youtube_video_id'> & { opening?: string | null }, win: string, s: Snapshot, sc: Score, late = false, step?: string): string {
-  const lines = [
-    `📊 <b>#${job.id} · ${win}</b>${late ? ' (caught up)' : ''} · ${esc(job.title ?? '')}`,
-    `${VERDICT[sc.verdict]}: ${esc(sc.reason)}.`,
-    esc(viralLine(s.views)),
-  ];
-  if (step) lines.push(`<b>Your move:</b> ${esc(step)}`);
-  // YouTube API Developer Policies III.E.4.h: derived numbers must be marked as not from YouTube.
-  lines.push('<i>Views are from YouTube; the verdict is worked out by this tool.</i>');
-  return lines.join('\n');
-}
 
 function median(xs: number[]): number {
   if (!xs.length) return 0;
@@ -375,7 +351,7 @@ export const openingKeyboard = (t: OpeningTest): Keyboard | undefined =>
   t.apply ? [[{ text: `✅ Use ${OPENING_LABEL[t.apply]} only`, callback_data: `op:0:${t.apply}` }]] : undefined;
 
 export async function weeklyReport(): Promise<string> {
-  return office.track('analyst', 'Writing the weekly report and re-tuning hooks and length', weeklyReportInner, () => 'Weekly report sent to Telegram');
+  return office.track('analyst', 'Writing the weekly report and re-tuning hooks and length', weeklyReportInner, (t) => (t.includes('<b>Your move (') || t.includes('/link ') ? 'Weekly report sent to Telegram' : 'Weekly report: nothing to do, so no Telegram message'));
 }
 
 // The channel-wide call in the Sunday report: the first funnel stage (stay → finish → shares →
@@ -420,8 +396,8 @@ async function weeklyReportInner(): Promise<string> {
   if (!rows.length) {
     const text = ['<b>Weekly report</b>', linkLines.length
       ? `<b>Your move:</b> link ${linkLines.length === 1 ? 'this upload' : 'these uploads'} so I can measure ${linkLines.length === 1 ? 'it' : 'them'}:\n${linkLines.join('\n')}`
-      : '<b>Your move:</b> ✅ Nothing. No video has numbers yet; the first scorecards come on their own.'].join('\n');
-    await say(text);
+      : '<b>Your move:</b> ✅ Nothing. No video has numbers yet.'].join('\n');
+    if (linkLines.length) await say(text);
     return text;
   }
   // Re-weights hook types and lengths; its details go to the export, not to Telegram.
@@ -479,7 +455,9 @@ async function weeklyReportInner(): Promise<string> {
     '<i>The full numbers go to Claude\'s Sunday review, not here.</i>',
   ].join('\n');
   const keyboard: Keyboard = [...((opening && openingKeyboard(opening)) || []), ...(long.keyboard ?? [])];
-  await say(text, keyboard.length ? keyboard : undefined);
+  // Telegram only hears about the week when there is something to tap or do. A week with nothing
+  // to do stays silent; its numbers and verdicts go to Claude's Sunday review through the export.
+  if (yours.length) await say(text, keyboard.length ? keyboard : undefined);
   await writeExport().catch((e) => console.error('[export]', e.message));
   return text;
 }
