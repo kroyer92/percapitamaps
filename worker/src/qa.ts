@@ -1,6 +1,7 @@
 // The automatic part of the QA gate (plan section B4). Fails block the video; warnings
 // are shown to you in the Telegram preview.
 import { run } from './lib/proc.js';
+import { measureLoudness } from './audio.js';
 import { transcribe, wordDiff, type Word } from './voice.js';
 import { licenseVerdict } from './data/fetch.js';
 import { findCountries } from './comment-draft.js';
@@ -13,14 +14,6 @@ export interface QaReport { passed: boolean; checks: Check[] }
 async function probe(file: string) {
   const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,width,height,r_frame_rate:format=duration', '-of', 'json', file]);
   return JSON.parse(stdout);
-}
-
-async function loudness(file: string): Promise<{ I: number; peak: number }> {
-  const { stderr } = await run('ffmpeg', ['-hide_banner', '-nostats', '-i', file, '-filter_complex', 'ebur128=peak=true', '-f', 'null', '-']);
-  const summary = stderr.slice(stderr.lastIndexOf('Summary:'));
-  const I = Number(summary.match(/I:\s+(-?[\d.]+) LUFS/)?.[1]);
-  const peak = Number(summary.match(/Peak:\s+(-?[\d.]+|-inf) dBFS/)?.[1]);
-  return { I, peak };
 }
 
 async function silences(file: string): Promise<{ start: number; end: number }[]> {
@@ -60,7 +53,7 @@ export async function runQa(opts: {
   add('Format', fmtOk ? 'pass' : 'fail', `${v?.width}x${v?.height} ${v?.r_frame_rate} ${v?.codec_name}+${a?.codec_name}`);
   add('Length', dur >= 20 && dur <= 45 ? 'pass' : dur >= 15 && dur <= 58 ? 'warn' : 'fail', `${dur.toFixed(1)} s (target 20–45)`);
 
-  const { I, peak } = await loudness(opts.video);
+  const { I, peak } = await measureLoudness(opts.video);
   add('Loudness', Math.abs(I + 14) <= 1 ? 'pass' : 'fail', `${I} LUFS (target -14 ±1)`);
   add('True peak', peak < -1 ? 'pass' : peak < 0 ? 'warn' : 'fail', `${peak} dBTP (target under -1)`);
 
