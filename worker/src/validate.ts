@@ -85,7 +85,7 @@ export function checkScript(script: Script, allowed: Set<string>, words: [number
     if (!b.vo || typeof b.vo !== 'string') { errors.push(`Beat ${i + 1} has no vo.`); return; }
     const w = wordCount(b.vo);
     if (w > 14) errors.push(`Beat ${i + 1} has ${w} spoken words; max 14.`);
-    if (i === 0 && w > 10) errors.push(`The hook (beat 1) has ${w} words; max 9.`);
+    if (i === 0 && w > 10) errors.push(`The hook (beat 1) has ${w} words; max 10.`);
     for (const re of BANNED) if (re.test(b.vo) || re.test(b.on_screen ?? '')) errors.push(`Beat ${i + 1} uses a banned phrase (${re.source}).`);
     const early = i < Math.floor((beats.length * 2) / 3);
     if (early && spoils(`${b.vo} ${b.on_screen ?? ''}`, spoiler))

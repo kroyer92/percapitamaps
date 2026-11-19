@@ -6,7 +6,7 @@ import { config } from './config.js';
 import { applySchema, one, q } from './db.js';
 import { queue } from './lib/queue.js';
 import { deletionResult, mapFixSweep, n8nInstalled, pendingDeletions, replacementUploaded, tick as replaceTick } from './replace.js';
-import { produceOne, cleanupOldRenders, requeueTiedRejects, resendLostPreviews } from './produce.js';
+import { produceOne, cleanupOldRenders, requeueTiedRejects, resendLostPreviews, redoLongHookFails } from './produce.js';
 import { discover } from './discover.js';
 import { instagramDue, linkVideo } from './publish.js';
 import { dueSnapshots, storeChannel, storeSnapshot, weeklyReport } from './analytics.js';
@@ -229,4 +229,6 @@ app.listen(config.port, async () => {
   await say(`🟢 Render worker started. Send /status any time. ${esc(config.channelName)}`).catch(() => undefined);
   // Previews Telegram refused over the caption's HTML before that was fixed (job #84).
   await resendLostPreviews().catch((e) => console.error('[resend previews]', e.message));
+  // Videos stopped by a hook over the word limit before that self-repaired (job #87).
+  await redoLongHookFails().catch((e) => console.error('[redo long hooks]', e.message));
 });

@@ -114,19 +114,21 @@ async function pickOpening(strip: Opening): Promise<Opening | undefined> {
   return s < k || (s === k && c?.last !== 'rank_strip') ? strip : undefined;
 }
 
-async function claimTopic(preferred: Format) {
+async function claimTopic(preferred: Format, onlyTopic?: number, exclude: number[] = []) {
+  // A topic sent back by the code (redoTopic) is claimed by id, so that exact video is made next.
+  if (onlyTopic) return one<any>(`UPDATE topics SET status = 'producing' WHERE id = $1 AND status = 'idea' RETURNING *`, [onlyTopic]);
   const blocked = (await blockedFormat()) ?? '';
   return one<any>(
     `UPDATE topics SET status = 'producing'
      WHERE id = (
        SELECT t.id FROM topics t JOIN datasets d ON d.id = t.dataset_id
-       WHERE t.status = 'idea' AND d.enabled
+       WHERE t.status = 'idea' AND d.enabled AND NOT (t.id = ANY($3::bigint[]))
          AND (t.source IN ('launch','followup') OR d.last_used_at IS NULL OR d.last_used_at < now() - interval '21 days')
        ORDER BY (t.source = 'launch') DESC, CASE WHEN t.source = 'launch' THEN t.priority END DESC NULLS LAST,
          (t.format = $1) DESC, (t.format = $2) ASC, t.priority DESC, t.id
        LIMIT 1 FOR UPDATE SKIP LOCKED)
      RETURNING *`,
-    [preferred, blocked],
+    [preferred, blocked, exclude],
   );
 }
 
@@ -156,9 +158,11 @@ export async function requeueTiedRejects(): Promise<string[]> {
   return back;
 }
 
-export async function produceOne(skips = 0, retry = 0): Promise<number | undefined> {
+// exclude: topics that already failed in this run, so the next try picks a different one.
+export async function produceOne(skips = 0, retry = 0, onlyTopic?: number, exclude: number[] = []): Promise<number | undefined> {
   const preferred = await pickFormat();
-  const topic = await claimTopic(preferred);
+  const topic = await claimTopic(preferred, onlyTopic, exclude);
+  if (!topic && onlyTopic) return undefined; // already made or picked up by a run in the meantime
   if (!topic) {
     await alert('WF2 found no topics to produce. Run WF1 (Discover) or queue the launch concepts.');
     return undefined;
@@ -258,8 +262,11 @@ export async function produceOne(skips = 0, retry = 0): Promise<number | undefin
       `UPDATE topics SET fail_count = fail_count + 1, status = CASE WHEN fail_count + 1 >= 3 THEN 'failed' ELSE 'idea' END, priority = priority - 1 WHERE id = $1 RETURNING fail_count`,
       [topic.id],
     );
-    await alert(`Job #${id} (${topic.question}) ${human ? 'needs a human look' : `failed while ${stage.now}`}: ${e.message}${e.detail ? `\n${JSON.stringify(e.detail).slice(0, 600)}` : ''}${t && t.fail_count >= 3 ? '\nThe topic failed 3 times and was moved to dead letter.' : ''}`);
-    return id;
+    // The run still makes a video: the next topic is tried at once (twice at most), so one bad topic
+    // never costs the day's slot. Job #87 stopped the 07:00 run on a hook that was too long.
+    const nextTopic = skips < 2;
+    await alert(`Job #${id} (${topic.question}) ${human ? 'could not be written' : `failed while ${stage.now}`}: ${e.message}${e.detail ? `\n${JSON.stringify(e.detail).slice(0, 600)}` : ''}${t && t.fail_count >= 3 ? '\nThe topic failed 3 times and was moved to dead letter.' : '\nThe topic stays in the queue for a later run.'}${nextTopic ? '\nNothing to do: I am making the next topic now.' : ''}`);
+    return nextTopic ? produceOne(skips + 1, retry, undefined, [...exclude, topic.id]) : id;
   }
 }
 
@@ -397,6 +404,26 @@ export async function resendLostPreviews(): Promise<number[]> {
     }
   }
   return sent;
+}
+
+// Topics whose planned script failed only because the hook fell back to a question over 10 words
+// (job #87 on 19 Nov 2026: "Which country generates the highest share of its electricity from
+// wind?"). That is fixed, so each one gets its strike and place back and is made again now. Runs at
+// start-up; a topic that already has a newer job is left alone, so this never loops.
+export async function redoLongHookFails(): Promise<number[]> {
+  const rows = await q<{ id: number; topic_id: number; question: string }>(
+    `SELECT j.id, j.topic_id, t.question FROM jobs j JOIN topics t ON t.id = j.topic_id
+     WHERE j.status = 'needs_human' AND j.error = 'The planned script failed the code checks.'
+       AND j.updated_at > now() - interval '3 days' AND t.status = 'idea'
+       AND array_length(regexp_split_to_array(trim(t.question), '\\s+'), 1) > 10
+       AND NOT EXISTS (SELECT 1 FROM jobs j2 WHERE j2.topic_id = j.topic_id AND j2.id > j.id)
+     ORDER BY j.id`);
+  for (const r of rows) {
+    await q(`UPDATE topics SET fail_count = GREATEST(fail_count - 1, 0), priority = priority + 1 WHERE id = $1`, [r.topic_id]);
+    await say(`🔁 Job #${r.id} (${esc(r.question)}) stopped on a hook that was too long. That is fixed, so I am making it again now. Nothing to do.`);
+    queue.add('produce', async () => { await produceOne(2, 0, r.topic_id); });
+  }
+  return rows.map((r) => r.id);
 }
 
 export async function cleanupOldRenders(): Promise<void> {
