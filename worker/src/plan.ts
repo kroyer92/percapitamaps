@@ -103,14 +103,34 @@ const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >
 
 interface Ctx { question: string; f: Facts; u: string; top: RankRow; seed: number }
 
-const hookSlot = ({ question }: Ctx, visual: string): Slot => ({
-  role: 'hook',
-  brief: `A hook of at most 9 words that makes the viewer want the answer to: "${question}". Do not name any country or number.`,
-  numbers: [],
-  fallback: question,
-  visual,
-  on_screen: question,
-});
+// Plain hooks for a question too long to be its own hook: no country, no number, at most 9 words.
+// Job #87 ("Which country generates the highest share of its electricity from wind?", 11 words)
+// fell back to the question and failed the hook limit, so the video was never made.
+const SHORT_HOOKS = [
+  'Most people get this one wrong.',
+  'Almost nobody guesses this one right.',
+  'The answer is not what you would expect.',
+  'This map surprises almost everyone.',
+];
+export const HOOK_MAX_WORDS = 10; // the same limit validate.ts checks beat 1 against
+
+export function hookFallbacks(question: string, seed = 0): string[] {
+  const short = SHORT_HOOKS.map((_, k) => SHORT_HOOKS[(seed + k) % SHORT_HOOKS.length]);
+  return wordCount(question) <= 9 ? [question, ...short] : short;
+}
+
+const hookSlot = ({ question, seed }: Ctx, visual: string): Slot => {
+  const [fallback, ...alts] = hookFallbacks(question, seed);
+  return {
+    role: 'hook',
+    brief: `A hook of at most 9 words that makes the viewer want the answer to: "${question}". Do not name any country or number.`,
+    numbers: [],
+    fallback,
+    alts,
+    visual,
+    on_screen: question,
+  };
+};
 
 function guessSlot({ f, u, question }: Ctx, minRank: number, visual: (iso: string) => string): Slot | undefined {
   const byIso = new Map(f.ranking.map((r) => [r.iso3, r]));
@@ -447,7 +467,7 @@ export function lineProblem(line: unknown, s: Slot, topName: string): string | u
   if (s.role === 'fixed') return 'fixed line';
   if (typeof line !== 'string' || !line.trim()) return 'empty';
   const w = wordCount(line);
-  if (w > (s.maxWords ?? (s.role === 'hook' ? 10 : MAX_WORDS))) return 'too long';
+  if (w > (s.maxWords ?? (s.role === 'hook' ? HOOK_MAX_WORDS : MAX_WORDS))) return 'too long';
   if (s.role !== 'hook' && w < 5) return 'too short';
   if (isBanned(line)) return 'banned phrase';
   if (s.country && !line.toLowerCase().includes(s.country.toLowerCase())) return 'missing country';
@@ -520,7 +540,9 @@ function shaper(countryNames: string[]) {
 // from the line (the map key and captions still show it).
 function plainLine(s: Slot, shape: (l: string) => Set<string>, usedHere: Set<string>, usedLately: Set<string>, unit = ''): string {
   const all = [s.fallback, ...(s.alts ?? [])];
-  const fits = (l: string) => wordCount(l) <= MAX_WORDS;
+  // The slot's own limit: a hook may have 10 words, not 14.
+  const max = s.maxWords ?? (s.role === 'hook' ? HOOK_MAX_WORDS : MAX_WORDS);
+  const fits = (l: string) => wordCount(l) <= max;
   let options = all.filter(fits);
   if (!options.length && unit) options = all.map((l) => l.split(` ${unit}`).join('')).filter(fits);
   if (!options.length) options = all;

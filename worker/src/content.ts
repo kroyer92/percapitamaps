@@ -5,7 +5,7 @@ import { chatJson } from './llm.js';
 import { factsForLlm, type Facts } from './facts.js';
 import * as P from './prompts.js';
 import { HIGH_END } from './data/catalog.js';
-import { fitLength, planFor, writePlanned, type Slot } from './plan.js';
+import { fitLength, hookFallbacks, planFor, writePlanned, type Slot } from './plan.js';
 import { speakable } from './voice.js';
 import { spokenName, type Opening } from './opening.js';
 import { findCountries } from './comment-draft.js';
@@ -201,8 +201,15 @@ export async function generateContent(opts: {
       if (fit.dropped) onStep(`Left out ${fit.dropped} spare beat: the video is long enough without it`);
       // The plan sets the length, so only real problems (numbers, codes) stop a planned script.
       // No fillers: padding a planned script added 3 extra rank lines and pushed job #16 to 63 s.
-      const left = checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, [], tiedNames)
+      const check = () => checkScript(script, allowed, [Math.round(words[0] * 0.9), Math.round(words[1] * 1.1)], spoiler, [], tiedNames)
         .filter((e) => !isMinor(e) && !e.startsWith('Total spoken words'));
+      let left = check();
+      // A hook over the limit is swapped for a short plain one instead of stopping the video (job #87).
+      if (left.some((e) => e.startsWith('The hook (beat 1)'))) {
+        onStep(`Hook too long ("${script.beats[0].vo}"); using a short plain hook`);
+        script.beats[0].vo = hookFallbacks(question)[0];
+        left = check();
+      }
       if (left.length) throw new NeedsHuman('The planned script failed the code checks.', left);
     } else {
       script = await writeScript(question, format, system, allowed, words, spoiler, fillers, opts.twist, fixHint, onStep, tiedNames);
@@ -212,7 +219,8 @@ export async function generateContent(opts: {
     onStep('Writing alternative hooks');
     // Hooks: keep only the ones that pass the same number and length checks.
     // Guess: the script's own hook may not name an option either; the question is the safe line.
-    if (namedOptions(originalHook, facts, format).length) originalHook = script.beats[0].vo = question;
+    // A question over 9 words is too long for a hook, so a short plain hook is used instead.
+    if (namedOptions(originalHook, facts, format).length) originalHook = script.beats[0].vo = hookFallbacks(question)[0];
     const optionNames = format === 'GUESS' ? facts.guess?.options.map((o) => o.name) : undefined;
     const h = await chatJson<{ hooks: Hook[]; test_first: number }>({ temperature: 0.6, system, user: P.hooksUser(question, script.beats[0].vo, optionNames) });
     const hooks = (h.hooks ?? []).filter((x) => x?.text && wordCount(x.text) <= 10 && !isBanned(x.text) && !spoils(x.text, spoiler) && !namedOptions(x.text, facts, format).length && numbersIn(x.text).every((n) => allowed.has(n))).slice(0, 5);
