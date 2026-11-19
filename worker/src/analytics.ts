@@ -5,7 +5,7 @@ import { config, FORMAT_NAMES, type Format } from './config.js';
 import { getSetting, q, setSetting } from './db.js';
 import { esc, say } from './telegram.js';
 import { ig, igToken } from './publish.js';
-import { score, mmss, nextStep, quantile, MIN_SAMPLE, STAGE_NAME, type Grade, type IgInsights, type Score, type Snapshot, type StepContext, type VideoInfo } from './scorecard.js';
+import { score, mmss, nextStep, quantile, viralLine, VIRAL_VIEWS, MIN_SAMPLE, STAGE_NAME, type Grade, type IgInsights, type Score, type Snapshot, type StepContext, type VideoInfo } from './scorecard.js';
 import { autoFollowup, hasFollowups, queueFollowup } from './followups.js';
 import type { Keyboard } from './telegram.js';
 import { isCurrent, versionOf, versionName } from './changes.js';
@@ -254,25 +254,20 @@ async function scoreAndTell(jobId: number, win: string, retryUntil = 0, late = f
   await say(scoreText(job, win, snap, sc, late, [made, nextStep(sc, ctx)].filter(Boolean).join(' ')));
 }
 
-const VERDICT: Record<Score['verdict'], string> = { winner: '🏆 Winner', average: '🙂 Average', loser: '🔻 Loser', early: '⏳ Too early' };
-const g = (x?: Grade) => (x ? ` (${x})` : '');
-const n1 = (x?: number) => (x === undefined ? '–' : x >= 10 ? String(Math.round(x)) : x.toFixed(1));
+const VERDICT: Record<Score['verdict'], string> = { winner: '⭐ Above our usual', average: '🙂 Our usual', loser: '🔻 Below our usual', early: '⏳ Too early' };
 
+// The Telegram scorecard is only the verdict and what to do. The grades, drop point and Instagram
+// numbers stay in the database and the weekly export, where Claude's Sunday review reads them:
+// Niko does not interpret numbers, so they don't go to him.
 export function scoreText(job: Pick<JobInfo, 'id' | 'title' | 'youtube_video_id'> & { opening?: string | null }, win: string, s: Snapshot, sc: Score, late = false, step?: string): string {
-  const v = sc.values;
   const lines = [
-    `📊 <b>#${job.id} · ${win}</b>${late ? ' (caught up)' : ''} · ${esc(job.title ?? '')}${job.opening ? ` · ${OPENING_LABEL[job.opening] ?? job.opening} opening` : ''}`,
-    `${VERDICT[sc.verdict]}: ${esc(sc.reason)}`,
-    `<b>YouTube</b> ${(v.views ?? 0).toLocaleString('en-US')} views · stayed ${n1(v.stay)}%${g(sc.grades.stay)} · watched ${n1(v.finish)}%${g(sc.grades.finish)} · ${n1(v.shares)} shares/1k${g(sc.grades.shares)} · ${n1(v.subs)} subs/1k${g(sc.grades.subs)}`,
+    `📊 <b>#${job.id} · ${win}</b>${late ? ' (caught up)' : ''} · ${esc(job.title ?? '')}`,
+    `${VERDICT[sc.verdict]}: ${esc(sc.reason)}.`,
+    esc(viralLine(s.views)),
   ];
-  if (s.ig?.error) lines.push(`<b>Instagram</b> no insights: ${esc(s.ig.error.slice(0, 160))}`);
-  else if (s.ig) lines.push(`<b>Instagram</b>${s.ig.age_hours !== undefined ? ` (Reel ${s.ig.age_hours}h old)` : ''} ${(s.ig.reach ?? 0).toLocaleString('en-US')} reached · skip ${n1(v.ig_skip)}%${g(sc.grades.ig_skip)} · watch ${n1(v.ig_watch_sec)} s${g(sc.grades.ig_watch)} · share ${n1(v.ig_share)}%${g(sc.grades.ig_share)}`);
-  if (sc.drop) lines.push(`<b>Biggest drop</b> −${Math.round(sc.drop.loss * 100)} pts at ${mmss(sc.drop.from)}–${mmss(sc.drop.to)}, beat ${sc.drop.beat + 1}: "${esc(sc.drop.line)}"`);
-  for (const w of sc.why ?? []) lines.push(`<b>Why</b> ${esc(w)}`);
-  if (sc.relative !== undefined) lines.push(`<i>${sc.relative.toFixed(1)}× your median engaged views at ${win}.</i>`);
   if (step) lines.push(`<b>Your move:</b> ${esc(step)}`);
   // YouTube API Developer Policies III.E.4.h: derived numbers must be marked as not from YouTube.
-  lines.push('<i>From YouTube: views and watched %. Stayed, per-1k rates, grades, drop and verdict are calculated by this tool, not YouTube metrics.</i>');
+  lines.push('<i>Views are from YouTube; the verdict is worked out by this tool.</i>');
   return lines.join('\n');
 }
 
@@ -418,7 +413,6 @@ async function weeklyReportInner(): Promise<string> {
      FROM jobs j JOIN metrics m ON m.job_id = j.id
      WHERE j.published_at > now() - interval '28 days'
      ORDER BY j.id, CASE m.win WHEN '7d' THEN 1 WHEN '72h' THEN 2 ELSE 3 END`);
-  const ideas = await q<{ question: string; format: string; source: string }>(`SELECT question, format, source FROM topics WHERE status = 'idea' ORDER BY (source='launch') DESC, priority DESC LIMIT 5`);
   const unlinked = await q<{ id: number; title: string | null }>(
     `SELECT id, packaging->>'title' AS title FROM jobs
      WHERE status = 'approved' AND youtube_video_id IS NULL AND slot_at < now() - interval '2 hours' AND slot_at > now() - interval '14 days' ORDER BY id`);
@@ -430,14 +424,8 @@ async function weeklyReportInner(): Promise<string> {
     await say(text);
     return text;
   }
-  const verdicts = await q<{ verdict: string; n: number }>(
-    `SELECT score->>'verdict' AS verdict, count(*)::int AS n FROM (
-       SELECT DISTINCT ON (m.job_id) m.score FROM metrics m JOIN jobs j ON j.id = m.job_id
-       WHERE j.published_at > now() - interval '28 days' AND m.score IS NOT NULL AND NOT ${PROVISIONAL_SQL}
-       ORDER BY m.job_id, CASE m.win WHEN '7d' THEN 1 WHEN '72h' THEN 2 ELSE 3 END) s
-     GROUP BY 1 ORDER BY 2 DESC`);
-  const verdictLine = verdicts.map((v) => `${v.verdict} ${v.n}`).join(' · ') || 'none scored yet';
-  const tuneLines = await autoTune().catch((e) => [`Auto-tuning failed: ${esc(String(e.message ?? e))}`]);
+  // Re-weights hook types and lengths; its details go to the export, not to Telegram.
+  const tuned = await autoTune().then(() => true).catch((e) => { console.error('[tune]', e.message); return false; });
   const opening = await openingTest().catch((e): undefined => { console.error('[opening]', e.message); return undefined; });
   const long = await longformReport().catch((e): { lines: string[]; move?: string; keyboard?: Keyboard } => {
     console.error('[longform report]', e.message);
@@ -456,18 +444,6 @@ async function weeklyReportInner(): Promise<string> {
      WHERE j.published_at > now() - interval '90 days' AND m.win IN ('72h','7d') AND NOT ${PROVISIONAL_SQL}
      ORDER BY j.id, CASE m.win WHEN '7d' THEN 1 ELSE 2 END`);
   const call = channelCall(history.filter((r) => r.score).map((r) => ({ grades: r.score!.grades ?? {}, current: isCurrent(r.format, r.made) })), opening);
-  const byVersion = new Map<string, { stay: number[]; apv: number[]; n: number }>();
-  for (const r of history) {
-    const k = `${FORMAT_NAMES[r.format as Format] ?? r.format} · ${versionName(versionOf(r.format, r.made))}${isCurrent(r.format, r.made) ? ' (current)' : ''}`;
-    const b = byVersion.get(k) ?? { stay: [], apv: [], n: 0 };
-    b.n++;
-    if (r.views && r.views >= MIN_SAMPLE && r.engaged !== null) b.stay.push(Math.min(100, (r.engaged / r.views) * 100));
-    if (r.apv !== null) b.apv.push(r.apv);
-    byVersion.set(k, b);
-  }
-  const versionLines = [...byVersion.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, b]) =>
-    `${esc(k)}: ${b.n} video${b.n === 1 ? '' : 's'} · median stayed ${b.stay.length ? `${Math.round(median(b.stay))}%` : '–'}${b.stay.length < b.n ? ` (${b.stay.length} with ${MIN_SAMPLE}+ views)` : ''} · watched ${b.apv.length ? `${Math.round(median(b.apv))}%` : '–'}`);
-
   // The top of the report: what Niko has to do, what was done for him, and what waits on data.
   const yours: string[] = [];
   if (linkLines.length) yours.push(`Link ${linkLines.length === 1 ? 'this upload' : 'these uploads'} so I can measure ${linkLines.length === 1 ? 'it' : 'them'}:\n${linkLines.join('\n')}`);
@@ -475,45 +451,33 @@ async function weeklyReportInner(): Promise<string> {
   if (call.kind === 'change') yours.push('Forward this report to Claude in the project chat (see "Channel call").');
   if (long.move) yours.push(long.move);
   const done = [
-    queued.length ? `Queued 2 follow-ups each for winner${queued.length === 1 ? '' : 's'} ${queued.map((i) => `#${i}`).join(', ')}.` : '',
-    winners.length && !queued.length ? `Winner${winners.length === 1 ? '' : 's'} ${winners.map((w) => `#${w.id}`).join(', ')} already ${winners.length === 1 ? 'has its' : 'have their'} follow-ups.` : '',
-    'Re-weighted hook types and lengths toward what earns more views (details below).',
+    queued.length ? `Queued 2 follow-ups each for ${queued.map((i) => `#${i}`).join(', ')} (above our usual).` : '',
+    winners.length && !queued.length ? `${winners.map((w) => `#${w.id}`).join(', ')} (above our usual) already ${winners.length === 1 ? 'has its' : 'have their'} follow-ups.` : '',
+    tuned ? 'Re-weighted hook types and lengths toward what earns more views.' : '',
   ].filter(Boolean);
   const waiting = [
     opening && !opening.decided && !opening.apply && !call.text.includes('opening test') ? `Map Reveal opening test: ${opening.readBy ? `readable around ${opening.readBy}` : 'not readable yet'}.` : '',
     call.kind === 'wait' ? call.text.replace(/^⏳ /, '') : '',
   ].filter(Boolean);
 
-  const sorted = [...rows].sort((a, b) => (b.views ?? 0) - (a.views ?? 0));
-  const cut = sorted[Math.max(0, Math.floor(sorted.length * 0.2) - 1)]?.views ?? Infinity;
-  const line = (r: (typeof rows)[number]) => `#${r.id} ${esc(r.title ?? '')} · ${(r.views ?? 0).toLocaleString('en-US')} views${r.avg_view_pct ? ` · ${Math.round(r.avg_view_pct)}% viewed` : ''} (${r.win})${(r.views ?? 0) >= cut ? ' 🏆' : ''}`;
-  const group = (key: 'format' | 'voice' | 'hook_type' | 'length_band') => {
-    const g = new Map<string, number[]>();
-    for (const r of rows) if (r[key]) g.set(String(r[key]), [...(g.get(String(r[key])) ?? []), r.views ?? 0]);
-    return [...g.entries()].map(([k, v]) => `${key === 'format' ? FORMAT_NAMES[k as Format] ?? k : k}: median ${Math.round(median(v)).toLocaleString('en-US')} (${v.length} video${v.length === 1 ? '' : 's'})`).join('\n');
-  };
+  // Only the verdict, the action and the honest view count go to Telegram. Everything else (by
+  // version, format, voice, hook, length, opening test, long-form detail) is in the weekly export,
+  // which Claude's Sunday review reads and turns into a verdict of its own.
+  const best = [...rows].sort((a, b) => (b.views ?? 0) - (a.views ?? 0))[0];
+  const viral = rows.filter((r) => (r.views ?? 0) >= VIRAL_VIEWS).length;
   const text = [
     '<b>Weekly report</b> (last 28 days)',
     yours.length
       ? `<b>Your move (${yours.length} thing${yours.length === 1 ? '' : 's'}):</b>\n${yours.map((y, i) => `${i + 1}. ${y}`).join('\n')}`
       : '<b>Your move:</b> ✅ Nothing this week.',
-    `<b>Done for you:</b> ${done.join(' ')}`,
+    ...(done.length ? [`<b>Done for you:</b> ${done.join(' ')}`] : []),
     ...(waiting.length ? [`<b>Waiting on data:</b> ${esc(waiting.join(' '))}`] : []),
-    '', '<b>Channel call</b>', esc(call.text),
-    ...(versionLines.length ? ['', '<b>By version</b> (all videos of the last 90 days, at 72 h or 7 d)', ...versionLines] : []),
-    '', '<b>Map Reveal opening test</b> (stayed at 72 h)', ...(opening?.lines ?? ['Could not read the test this week; it is retried next Sunday.']).map(esc),
-    '', '<b>Weekly long video</b> (🎮 game style, 🗺 classic)', ...long.lines,
-    '', '<b>Top 5</b>', ...sorted.slice(0, 5).map(line),
-    ...(sorted.length > 5 ? ['', '<b>Bottom 5</b>', ...sorted.slice(-5).reverse().map(line)] : []),
-    '', '<b>By format</b>', group('format'),
-    '', '<b>By voice</b>', group('voice'),
-    group('hook_type') ? `\n<b>By hook type</b>\n${group('hook_type')}` : '',
-    group('length_band') ? `\n<b>By length</b>\n${group('length_band')}` : '',
-    '', '<b>Next in the queue</b>', ...ideas.map((i) => `· ${esc(i.question)} (${i.format}${i.source !== 'discover' ? `, ${i.source}` : ''})`),
-    '', '<b>Verdicts</b>', verdictLine,
-    '', '<b>Auto-tuning</b> (done automatically)', ...tuneLines,
-    '', '<i>🏆 = top 20% by views.</i>',
-  ].filter((l) => l !== undefined).join('\n');
+    ...(call.kind === 'wait' ? [] : [`<b>Channel call:</b> ${esc(call.text)}`]),
+    `<b>Best video:</b> #${best.id} ${esc(best.title ?? '')}, ${(best.views ?? 0).toLocaleString('en-US')} views. ${viral
+      ? `🚀 ${viral} of ${rows.length} videos went viral (${VIRAL_VIEWS.toLocaleString('en-US')}+ views).`
+      : `None of ${rows.length} videos went viral yet (that takes ${VIRAL_VIEWS.toLocaleString('en-US')}+ views).`}`,
+    '<i>The full numbers go to Claude\'s Sunday review, not here.</i>',
+  ].join('\n');
   const keyboard: Keyboard = [...((opening && openingKeyboard(opening)) || []), ...(long.keyboard ?? [])];
   await say(text, keyboard.length ? keyboard : undefined);
   await writeExport().catch((e) => console.error('[export]', e.message));
