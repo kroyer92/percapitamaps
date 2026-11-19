@@ -68,6 +68,18 @@ export const BANDS: Record<string, Band> = {
   ig_share: { kill: 0.5, ok: 1, strong: 2 }, // shares as % of reach
 };
 
+// Where "viral" starts for a channel this size: 10,000+ views on one Short. "Winner" only means
+// better than our own usual, so every message that grades a video also says how far it is from this.
+export const VIRAL_VIEWS = 10_000;
+
+/** One plain line: did this video go viral, and if not, how far off it is. */
+export function viralLine(views: number | null | undefined): string {
+  const v = Math.max(0, Math.round(views ?? 0));
+  return v >= VIRAL_VIEWS
+    ? `🚀 Viral: ${v.toLocaleString('en-US')} views (the bar is ${VIRAL_VIEWS.toLocaleString('en-US')}).`
+    : `Not viral: ${v.toLocaleString('en-US')} of the ${VIRAL_VIEWS.toLocaleString('en-US')} views that count as viral.`;
+}
+
 export const MIN_SAMPLE = 300; // views (YouTube) or reach (Instagram) before percentages mean much
 const PEERS_FOR_BANDS = 10;
 const PEERS_FOR_MEDIAN = 5;
@@ -193,7 +205,7 @@ export function nextStep(sc: Score, ctx: StepContext): string {
       ? `The weak first second is the known channel-wide problem, and the Map Reveal opening test is the fix being tried. Nothing changes until it is read${t.readBy ? ` (around ${t.readBy})` : ''}; changing things now would spoil it.`
       : 'The weak first second is the known channel-wide problem; the Sunday report says when there is enough data for the next fix.');
   } else if (sc.verdict === 'average' && !['finish', 'shares', 'subs'].some((k) => bad(sc.grades[k]))) {
-    parts.push('It is on target.');
+    parts.push('It did about as well as our usual.');
   } else {
     parts.push('One video is too little to change anything on. If the same weakness shows across videos, the Sunday report says so and what changes.');
   }
@@ -222,19 +234,19 @@ export function score(s: Snapshot, v: VideoInfo, peers: Snapshot[]): Score {
   let verdict: Verdict;
   let reason: string;
   if (relative !== undefined && relative >= 2) {
-    verdict = 'winner'; reason = `${relative.toFixed(1)}× your median engaged views`;
+    verdict = 'winner'; reason = `${relative.toFixed(1)}× our usual views`;
   } else if (ytEnough && strong >= 2 && !anyKill) {
-    verdict = 'winner'; reason = `${strong} stages strong, none failing`;
+    verdict = 'winner'; reason = 'held viewers better than our usual';
   } else if (ytEnough && grades.stay === 'kill') {
     verdict = 'loser'; reason = 'too many viewers swipe away in the first second';
   } else if (s.win === '7d' && relative !== undefined && relative < 0.5) {
-    verdict = 'loser'; reason = `${relative.toFixed(1)}× your median engaged views after 7 days`;
+    verdict = 'loser'; reason = `${relative.toFixed(1)}× our usual views after 7 days`;
   } else if (s.win === '7d' && !ytEnough) {
     verdict = 'loser'; reason = `under ${MIN_SAMPLE} views in 7 days, so the feed stopped testing it (the first seconds are the usual cause)`;
   } else if (!ytEnough) {
     verdict = 'early'; reason = `under ${MIN_SAMPLE} views so far, too few to judge`;
   } else {
-    verdict = 'average'; reason = anyKill ? 'a stage is failing' : stages.includes('weak') ? 'nothing failing, but below target in places' : 'on target, nothing standing out';
+    verdict = 'average'; reason = anyKill || stages.includes('weak') ? 'about our usual, weak in places' : 'about our usual';
   }
   return { verdict, reason, values, grades, relative, drop, why: whyFor(grades, drop), peers: peers.length };
 }

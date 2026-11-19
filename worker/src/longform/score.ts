@@ -140,23 +140,22 @@ export function scoreLong(
 
 const VERDICT: Record<LongScore['verdict'], string> = { on_target: '🏆 On target', mixed: '🙂 Mixed', below: '🔻 Below target', early: '⏳ Too early' };
 
+// The Telegram scorecard is only the verdict and what to do; the watch numbers, the chapter that
+// loses viewers and the curve stay in the weekly export for Claude's Sunday review.
 export function longScoreText(lf: { n: number; title?: string | null; style: string }, win: string, sc: LongScore, next?: { win: string; at: string }): string {
   const reason = sc.verdict === 'early'
-    ? `${sc.views.toLocaleString('en-US')} views so far; under ${MIN_VIEWS} says nothing yet.`
-    : `${pct(sc.keep30)} still watching at 0:30 (target ${KEEP_TARGET}%), ${pct(sc.watched)} watched on average (target ${WATCHED_TARGET}%).`;
-  const lines = [
+    ? `${sc.views.toLocaleString('en-US')} views so far, too few to judge.`
+    : sc.verdict === 'on_target' ? 'viewers stay as long as we aim for.' : sc.verdict === 'mixed' ? 'viewers stay close to what we aim for, but not all the way.' : 'viewers leave sooner than we aim for.';
+  const later = next ? ` The ${next.win} scorecard comes around ${next.at}.` : '';
+  return [
     `📊 <b>Long-form #${lf.n} · ${win}</b> · ${esc(lf.title ?? '')} · ${STYLE_NAME[lf.style as LongStyle] ?? esc(lf.style)}`,
-    `${VERDICT[sc.verdict]}: ${reason}`,
-    `<b>YouTube</b> ${sc.views.toLocaleString('en-US')} views · watched ${pct(sc.watched)}${sc.avgSec !== undefined ? ` (${mmss(sc.avgSec)} on average)` : ''}${sc.watchHours !== undefined ? ` · ${sc.watchHours >= 10 ? Math.round(sc.watchHours) : sc.watchHours.toFixed(1)} watch hours` : ''}${sc.comments !== undefined ? ` · ${sc.comments} comments` : ''}${sc.subs !== undefined ? ` · +${sc.subs} subs` : ''}`,
-  ];
-  if (sc.drop && sc.drop.left >= 1) lines.push(`<b>Loses viewers fastest</b> ${esc(sc.drop.label)} (${mmss(sc.drop.from)}–${mmss(sc.drop.to)}): ${Math.round(sc.drop.left)}% of those watching at its start left during it.`);
-  const later = next ? ` The ${next.win} numbers come around ${next.at}.` : '';
-  lines.push(`<b>Your move:</b> ${sc.verdict === 'early'
-    ? `✅ Nothing.${later}`
-    : `✅ Nothing. One video is not enough to change the long-form; the Sunday report compares the styles once ${GAME_VIDEOS_FOR_CALL} game-style videos have 7-day numbers.${later}`}`);
-  // YouTube API Developer Policies III.E.4.h: derived numbers must be marked as not from YouTube.
-  lines.push('<i>From YouTube: views, watched %, average view duration, comments, subscribers and the retention curve. Still watching at 0:30, watch hours, the chapter that loses viewers fastest and the verdict are calculated by this tool, not YouTube metrics.</i>');
-  return lines.join('\n');
+    `${VERDICT[sc.verdict]}: ${reason} ${sc.views.toLocaleString('en-US')} views.`,
+    `<b>Your move:</b> ${sc.verdict === 'early'
+      ? `✅ Nothing.${later}`
+      : `✅ Nothing. One video is not enough to change the long-form; the Sunday report says when there is a call to make.${later}`}`,
+    // YouTube API Developer Policies III.E.4.h: derived numbers must be marked as not from YouTube.
+    '<i>Views are from YouTube; the verdict is worked out by this tool.</i>',
+  ].join('\n');
 }
 
 // ---------- WF5 delivered a snapshot for "L<n>" (analytics.ts parses the body and hands it over)
