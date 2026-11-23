@@ -86,6 +86,8 @@ export interface LongScore {
   drop?: { label: string; from: number; to: number; left: number; rate: number };
   verdict: 'early' | 'on_target' | 'mixed' | 'below';
   provisional?: boolean;
+  lifetimeViews?: number; // videos.list viewCount when the snapshot was fetched
+  check?: 'video_not_found' | 'window_zero_lifetime_views'; // something is off with the measurement
 }
 
 // YouTube's retention curve: [share of the video, viewers there per view], about 100 points.
@@ -163,6 +165,18 @@ export async function storeLongformSnapshot(x: {
     [x.n, x.win, x.views, x.avg_view_pct, x.avg_view_sec, x.likes, x.shares, x.comments, x.subs_gained, x.body, x.curve ? JSON.stringify(x.curve) : null]);
   const sc = scoreLong(x, Number(lf.seconds ?? 0), lf.chapters ?? []);
   if (Date.now() < settleAt(pub, hours)) sc.provisional = true;
+  // A check on the measurement itself. videos.list gives the lifetime count, which can only be
+  // equal to or higher than the window's. No item at all means the linked id is wrong or the
+  // video is gone; lifetime views with an Analytics window of 0 means the window measured nothing.
+  const items = x.body?.stats?.items;
+  if (Array.isArray(items) && !items.length) sc.check = 'video_not_found';
+  else {
+    const life = Number(items?.[0]?.statistics?.viewCount);
+    if (!isNaN(life)) {
+      sc.lifetimeViews = life;
+      if (!sc.provisional && (x.views ?? 0) === 0 && life >= MIN_VIEWS) sc.check = 'window_zero_lifetime_views';
+    }
+  }
   await q('UPDATE longform_metrics SET score = $3 WHERE n = $1 AND win = $2', [x.n, x.win, sc]);
   // No Telegram scorecard: one long-form never needs anything from Niko. The verdict is saved for
   // the Sunday report (which offers the one button when a style call is due) and Claude's review.
@@ -209,8 +223,11 @@ export async function longformReport(): Promise<{ lines: string[]; move?: string
 // For the analysis export: every long-form of the last 120 days with its snapshots.
 export async function longformExport(): Promise<unknown[]> {
   return q(
-    `SELECT l.n, l.style, l.theme, l.publish_at, l.seconds, l.chapters, l.packaging->>'title' AS title,
-       json_agg(json_build_object('win', m.win, 'views', m.views, 'avg_view_pct', m.avg_view_pct, 'avg_view_sec', m.avg_view_sec,
+    `SELECT l.n, l.style, l.theme, l.publish_at, l.seconds, l.chapters, l.packaging->>'title' AS title, l.youtube_url,
+       json_agg(json_build_object('win', m.win, 'captured_at', m.captured_at, 'views', m.views,
+         'yt_found', CASE WHEN jsonb_typeof(m.raw->'stats'->'items') = 'array' THEN jsonb_array_length(m.raw->'stats'->'items') > 0 ELSE false END,
+         'yt_lifetime_views', m.raw->'stats'->'items'->0->'statistics'->>'viewCount',
+         'yt_published_at', m.raw->'stats'->'items'->0->'snippet'->>'publishedAt', 'avg_view_pct', m.avg_view_pct, 'avg_view_sec', m.avg_view_sec,
          'likes', m.likes, 'shares', m.shares, 'comments', m.comments, 'subs_gained', m.subs_gained, 'score', m.score) ORDER BY m.captured_at) AS snapshots
      FROM longforms l JOIN longform_metrics m ON m.n = l.n
      WHERE l.publish_at > now() - interval '120 days'
