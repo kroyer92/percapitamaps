@@ -1,0 +1,416 @@
+{
+  "id": "Pc8RschMoveVid0W",
+  "name": "WF8 Reschedule moved Shorts",
+  "active": false,
+  "nodes": [
+    {
+      "id": "wf8-every5",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "wf8-manual",
+      "name": "Run manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        180
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "wf8-ask",
+      "name": "Ask the worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.PERCAPITA_WORKER_URL || 'http://render-worker:8080' }}/youtube/reschedules",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "wf8-due",
+      "name": "Moves due",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        80
+      ],
+      "parameters": {
+        "jsCode": "\n// The worker's list (an empty list means nothing to do this round).\nconst r = $input.first().json;\nconst list = r.statusCode === 200 && Array.isArray(r.body) ? r.body : [];\nreturn list.map((d) => ({ json: d }));\n"
+      }
+    },
+    {
+      "id": "wf8-chan",
+      "name": "My channel",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.YOUTUBE_API_BASE || 'https://www.googleapis.com/youtube/v3' }}/channels?part=id&mine=true",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "wf8-vid",
+      "name": "The video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        80
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.YOUTUBE_API_BASE || 'https://www.googleapis.com/youtube/v3' }}/videos?part=status,snippet&id={{ $('Moves due').item.json.video_id }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "wf8-decide",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        80
+      ],
+      "parameters": {
+        "jsCode": "\n// Checks before a scheduled time is changed (see worker/src/reschedule.ts): the video is on our\n// channel and still a private video with a scheduled time that is not about to arrive. Anything\n// else is reported to the worker, never changed.\nconst d = $('Moves due').item.json;\nconst ch = $('My channel').item.json;\nconst vid = $('The video').item.json;\nconst target = new Date(d.publish_at).getTime();\nconst out = (action, ok, detail, body) => ({ json: { ...d, action, body: body ? JSON.stringify(body) : '', payload: JSON.stringify({ ok, detail }) } });\n// No answer at all (network hiccup): try again next round.\nif (!ch.statusCode || !vid.statusCode) return out('wait', false, '');\nif (ch.statusCode !== 200 || !ch.body?.items?.length) return out('report', false, `YouTube login failed (channels answered ${ch.statusCode})`);\nif (vid.statusCode !== 200) return out('report', false, `YouTube answered ${vid.statusCode} when reading the video`);\nconst v = (vid.body.items ?? [])[0];\nif (!v) return out('report', false, 'the video is not on YouTube');\nif (v.snippet.channelId !== ch.body.items[0].id) return out('report', false, 'the video is not on this channel');\nconst s = v.status ?? {};\nconst now = Date.now();\nconst at = s.publishAt ? new Date(s.publishAt).getTime() : NaN;\nif (Math.abs(at - target) <= 120_000) return out('report', true, 'already at the new time');\nif (s.privacyStatus !== 'private' || !(at > now + 10 * 60_000)) return out('report', false, `it is no longer a scheduled private video (privacy ${s.privacyStatus}, publishAt ${s.publishAt}), so it was left alone`);\nif (!(target > now + 10 * 60_000)) return out('report', false, 'the new time is too close');\n// part=status replaces the whole status, so the writable fields are sent back as they are.\nconst status = { privacyStatus: 'private', publishAt: new Date(target).toISOString() };\nfor (const k of ['embeddable', 'license', 'publicStatsViewable', 'containsSyntheticMedia']) if (s[k] !== undefined) status[k] = s[k];\nstatus.selfDeclaredMadeForKids = s.selfDeclaredMadeForKids ?? s.madeForKids ?? false;\nreturn out('move', true, 'moved', { id: v.id, status });\n",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "wf8-ismove",
+      "name": "Move it?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "wf8-ismove-c",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "move",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf8-put",
+      "name": "Change the time",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ $env.YOUTUBE_API_BASE || 'https://www.googleapis.com/youtube/v3' }}/videos?part=status",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "youTubeOAuth2Api"
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "wf8-after",
+      "name": "Moved?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "jsCode": "\nconst d = $('Decide').item.json;\nconst r = $json;\nconst want = new Date(d.publish_at).getTime();\nconst got = r.body?.status?.publishAt ? new Date(r.body.status.publishAt).getTime() : NaN;\nconst ok = r.statusCode === 200 && Math.abs(got - want) <= 120_000;\nconst detail = ok ? 'moved' : `YouTube answered ${r.statusCode} to the change: ${JSON.stringify(r.body ?? '').slice(0, 200)}`;\nreturn { json: { ...d, payload: JSON.stringify({ ok, detail }) } };\n",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "wf8-isrep",
+      "name": "Report it?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "wf8-isrep-c",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "report",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf8-tell",
+      "name": "Tell the worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.PERCAPITA_WORKER_URL || 'http://render-worker:8080' }}/youtube/reschedules/{{ $json.job }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.payload }}"
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    }
+  ],
+  "connections": {
+    "Every 5 minutes": {
+      "main": [
+        [
+          {
+            "node": "Ask the worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run manually": {
+      "main": [
+        [
+          {
+            "node": "Ask the worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask the worker": {
+      "main": [
+        [
+          {
+            "node": "Moves due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Moves due": {
+      "main": [
+        [
+          {
+            "node": "My channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "My channel": {
+      "main": [
+        [
+          {
+            "node": "The video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "The video": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Move it?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Move it?": {
+      "main": [
+        [
+          {
+            "node": "Change the time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report it?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Change the time": {
+      "main": [
+        [
+          {
+            "node": "Moved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Moved?": {
+      "main": [
+        [
+          {
+            "node": "Tell the worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report it?": {
+      "main": [
+        [
+          {
+            "node": "Tell the worker",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "errorWorkflow": "WaMuKb7OhPyHjGKs",
+    "saveDataSuccessExecution": "none"
+  },
+  "pinData": {},
+  "tags": []
+}

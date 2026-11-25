@@ -2,7 +2,6 @@
 // World Bank, each new topic is queued at the front with the numbers it will use sent to Telegram,
 // and the videos are made right away instead of waiting for the next 07:00 or 15:00 UTC run.
 // A topic already in the table is left alone, so a restart never makes a video twice.
-import { config } from './config.js';
 import { one, q } from './db.js';
 import { PINNED_DATASETS, PINNED_TOPICS } from './data/pinned.js';
 import { getDataset, upsertDataset } from './datasets.js';
@@ -58,7 +57,7 @@ export async function queuePinned(attempt = 0): Promise<void> {
     await say([
       `📌 <b>${made.length} pinned Short${made.length > 1 ? 's' : ''} at the front of the queue</b>, being made now:`,
       ...lines,
-      `The previews come here for approval as usual. Once approved, each goes out at the next free time (the extra times ${config.prioritySlots.join(' and ')} US Eastern are open to them), ahead of everything already scheduled. Nothing else to do.`,
+      `The previews come here for approval as usual. Once approved, each takes the next normal slot and the Shorts already scheduled move back one slot each (YouTube is updated by itself). Nothing else to do.`,
     ].join('\n\n'));
     for (const id of made) queue.add('produce (pinned)', async () => { await produceOne(2, 0, id); });
   }

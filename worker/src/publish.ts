@@ -11,20 +11,18 @@ import { fmtIn, upcomingSlots } from './lib/time.js';
 import type { JobRow } from './produce.js';
 import * as office from './activity.js';
 import { approveNation } from './nation/make.js';
+import { jumpQueue, jumpText } from './reschedule.js';
 
 const PLAYLIST_NAMES: Record<Format, string> = {
   MAP_REVEAL: 'Map Reveals', COUNTDOWN: 'Top 10 Countdowns', THEN_NOW: 'Then vs Now', SCALE: 'If the World Were 100 People', GUESS: 'Guess the Country',
 };
 
-// The first free publishing time. A pinned Short may also use the extra PRIORITY_SLOTS times, so it
-// goes out at the next free one of either list, ahead of every Short already scheduled; no scheduled
-// Short is moved. A free time within 2 hours of another Short is skipped, so two never land together.
-export async function nextSlot(pinned = false): Promise<Date> {
-  const taken = (await q<{ slot_at: Date }>(`SELECT slot_at FROM jobs WHERE slot_at IS NOT NULL AND slot_at > now() - interval '2 hours'`)).map((r) => +new Date(r.slot_at));
+export async function nextSlot(): Promise<Date> {
+  const taken = new Set(
+    (await q<{ slot_at: Date }>(`SELECT slot_at FROM jobs WHERE slot_at IS NOT NULL AND slot_at > now()`)).map((r) => +new Date(r.slot_at)),
+  );
   const soonest = new Date(Date.now() + 60 * 60_000);
-  const times = pinned ? [...config.publishSlots, ...config.prioritySlots] : config.publishSlots;
-  const free = (s: Date) => (pinned ? taken.every((t) => Math.abs(t - +s) >= 2 * 3_600_000) : !taken.includes(+s));
-  return upcomingSlots(times, config.slotTz, soonest, 30).find(free) ?? soonest;
+  return upcomingSlots(config.publishSlots, config.slotTz, soonest, 30).find((s) => !taken.has(+s)) ?? soonest;
 }
 
 export async function approve(id: number): Promise<void> {
@@ -37,7 +35,9 @@ export async function approve(id: number): Promise<void> {
   // Per Capita Nation episodes keep their own daily slot and packaging (nation/make.ts).
   if (isNation(job.format)) return approveNation(job);
   const topic = await one<{ question: string; source: string }>('SELECT question, source FROM topics WHERE id = $1', [job.topic_id]);
-  const slot = await nextSlot(topic?.source === 'pinned');
+  // A pinned Short takes the next normal slot and the queue moves back one slot (reschedule.ts).
+  const jump = topic?.source === 'pinned' ? await jumpQueue(id) : undefined;
+  const slot = jump?.slot ?? (await nextSlot());
   const series = config.seriesNaming
     ? ((await one<{ n: number }>(`SELECT count(*)::int AS n FROM jobs WHERE format = $1 AND series_no IS NOT NULL`, [job.format]))?.n ?? 0) + 1
     : null;
@@ -55,7 +55,7 @@ export async function approve(id: number): Promise<void> {
   const playlist = config.playlists[job.format] ? PLAYLIST_NAMES[job.format] : `${PLAYLIST_NAMES[job.format]} (no ID in app/.env yet)`;
   if (config.youtubeApiUploads) {
     await handToN8n(job, packaging, slot);
-    await say(`✅ Approved #${id}. Uploading through the YouTube API, scheduled for ${when}.`);
+    await say(`✅ Approved #${id}. Uploading through the YouTube API, scheduled for ${when}.${jump ? jumpText(jump) : ''}`);
     return;
   }
   await say([
