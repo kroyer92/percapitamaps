@@ -2,7 +2,8 @@
 // World Bank, each new topic is queued at the front with the numbers it will use sent to Telegram,
 // and the videos are made right away instead of waiting for the next 07:00 or 15:00 UTC run.
 // A topic already in the table is left alone, so a restart never makes a video twice.
-import { one, q } from './db.js';
+import { getSetting, one, q, setSetting } from './db.js';
+import { requestReplacement } from './replace.js';
 import { PINNED_DATASETS, PINNED_TOPICS } from './data/pinned.js';
 import { getDataset, upsertDataset } from './datasets.js';
 import { checkDatasets } from './cli/check-datasets.js';
@@ -24,6 +25,7 @@ export async function queuePinned(attempt = 0): Promise<void> {
   if (stale.length) await checkDatasets(stale.map((r) => r.id));
 
   await syncQuestions();
+  await fixCutHeadlinesOnce();
 
   const lines: string[] = [];
   const made: number[] = [];
@@ -70,20 +72,58 @@ export async function queuePinned(attempt = 0): Promise<void> {
 }
 
 // A question changed in data/pinned.ts after its topic was queued (job #103: a 10-word question was
-// cut to "Which economy does GTA 6's first" on screen). The topic takes the new wording, and a
-// preview still waiting for approval is rendered again with it as the hook's headline, same voice
-// and script; the new preview replaces the old one.
+// cut to "Which economy does GTA 6's first" on screen). The topic takes the new wording. Only a Map
+// Reveal with the classic opening shows the question as its headline, so only such a preview is
+// rendered again (Countdown and Guess show the spoken hook instead: #104 was re-sent for nothing).
 async function syncQuestions(): Promise<void> {
   for (const t of PINNED_TOPICS) {
     const topic = await one<{ id: number; question: string }>(`SELECT id, question FROM topics WHERE concept_key = $1 AND source = 'pinned'`, [t.key]);
     if (!topic || topic.question === t.question) continue;
     await q('UPDATE topics SET question = $2 WHERE id = $1', [topic.id, t.question]);
     const jobs = await q<JobRow>(`SELECT * FROM jobs WHERE topic_id = $1 AND status = 'awaiting_approval' AND script IS NOT NULL`, [topic.id]);
-    for (const job of jobs) {
-      const beats = job.script.beats.map((b, i) => (i === 0 && wordCount(t.question) <= 9 ? { ...b, on_screen: t.question } : b));
-      await q('UPDATE jobs SET script = $2, updated_at = now() WHERE id = $1', [job.id, { ...job.script, beats }]);
-      queue.add(`re-render #${job.id} (full question)`, async () => { await renderAndPreview(job.id, true); });
-      await say(`🔁 #${job.id} is being rendered again: its question was too long, so the screen showed only "${esc(job.script.beats[0].on_screen)}". The new preview shows "${esc(t.question)}" in full and replaces the old one. Nothing to do.`);
+    for (const job of jobs) if (showsQuestion(job)) await fixHeadline(job, t.question);
+  }
+}
+
+const showsQuestion = (job: JobRow) => job.format === 'MAP_REVEAL' && !job.script?.opening;
+
+function withQuestion(job: JobRow, question: string): JobRow['script'] {
+  return { ...job.script, beats: job.script.beats.map((b, i) => (i === 0 && wordCount(question) <= 9 ? { ...b, on_screen: question } : b)) };
+}
+
+// The headline of a preview still waiting for approval: written into the script, then the video is
+// rendered again with the same voice and sent as a new preview.
+async function fixHeadline(job: JobRow, question: string): Promise<void> {
+  const old = job.script.beats[0]?.on_screen ?? '';
+  await q('UPDATE jobs SET script = $2, updated_at = now() WHERE id = $1', [job.id, withQuestion(job, question)]);
+  queue.add(`re-render #${job.id} (full question)`, async () => { await renderAndPreview(job.id, true); });
+  await say(`🔁 #${job.id} is being rendered again${old && old !== question ? `: the screen showed only "${esc(old)}"` : ''}. The new preview shows "${esc(question)}" in full; approve that one. Nothing else to do.`);
+}
+
+// Once (25 Nov 2026): the GTA map Short (#103) still had the cut headline after PR #54, whatever
+// happened to it since. Its latest video is put right by its state: a waiting preview is rendered
+// again; a scheduled upload is swapped for a fixed render in the same slot (replace.ts); a rejected
+// or failed one is made again from scratch. One that is already live is left alone.
+export async function fixCutHeadlinesOnce(): Promise<void> {
+  const key = 'pinned_headline_fix_v1';
+  if (await getSetting(key)) return;
+  await setSetting(key, { at: new Date().toISOString() });
+  for (const t of PINNED_TOPICS.filter((x) => x.format === 'MAP_REVEAL')) {
+    const topic = await one<{ id: number; status: string }>(`SELECT id, status FROM topics WHERE concept_key = $1 AND source = 'pinned'`, [t.key]);
+    if (!topic) continue;
+    const job = await one<JobRow>('SELECT * FROM jobs WHERE topic_id = $1 ORDER BY id DESC LIMIT 1', [topic.id]);
+    if (!job || job.script?.opening) continue;
+    if (job.status === 'awaiting_approval' && job.script) { await fixHeadline(job, t.question); continue; }
+    if (['approved', 'published'].includes(job.status) && job.script) {
+      await q('UPDATE jobs SET script = $2, updated_at = now() WHERE id = $1', [job.id, withQuestion(job, t.question)]);
+      if (job.youtube_video_id) await say(await requestReplacement(job.id, `The question is now shown in full ("${t.question}"); the old version showed only its first 6 words.`));
+      else await say(`#${job.id} is already approved but not uploaded yet, so it goes up with the short headline. Nothing to do.`);
+      continue;
+    }
+    if (['rejected', 'skipped', 'render_failed', 'needs_human', 'dead_letter'].includes(job.status)) {
+      await q(`UPDATE topics SET status = 'idea', fail_count = 0 WHERE id = $1`, [topic.id]);
+      queue.add('produce (pinned, again)', async () => { await produceOne(2, 0, topic.id); });
+      await say(`🔁 #${job.id} (${esc(t.question)}) is ${job.status}, so it is being made again from scratch with the full question on screen. The new preview comes here for approval. Nothing else to do.`);
     }
   }
 }
