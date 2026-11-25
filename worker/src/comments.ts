@@ -10,7 +10,7 @@ import { CATALOG } from './data/catalog.js';
 import { one, q, getSetting, setSetting } from './db.js';
 import type { Facts } from './facts.js';
 import { chatLocalJson, unloadModels } from './llm.js';
-import { ig, igToken } from './publish.js';
+import { ig, igToken, igTokenDead, IG_TOKEN_STEPS } from './publish.js';
 import { esc, say } from './telegram.js';
 import { draftFor, modelPrompt, type Draft, type ModelView } from './comment-draft.js';
 import * as office from './activity.js';
@@ -85,12 +85,12 @@ export function igPermissionError(msg: string): boolean {
 }
 
 export function igFixText(msg: string): string {
+  if (igTokenDead(msg)) return `Instagram said: ${msg.slice(0, 200)}\n\n${IG_TOKEN_STEPS}`;
   if (!igPermissionError(msg)) return `Instagram said: ${msg.slice(0, 200)}`;
   return [
     'The Instagram token is not allowed to read comments (it lacks <code>instagram_business_manage_comments</code>).',
     'Fix, once: developers.facebook.com → your app → Instagram → API setup with Instagram login → add the permission <code>instagram_business_manage_comments</code> → Generate token for @PerCapitaMaps.',
-    'Put the new token in <code>/opt/percapita/app/.env</code> as INSTAGRAM_ACCESS_TOKEN, then run:',
-    `<code>cd /opt/percapita && docker compose exec postgres psql -U percapita -d percapita -c "DELETE FROM settings WHERE key='instagram_token';" && docker compose up -d</code>`,
+    'Then paste it in this chat as <code>/igtoken PASTE_TOKEN</code>. No server login needed.',
   ].join('\n');
 }
 
@@ -162,6 +162,8 @@ async function instagramComments(): Promise<ViewerComment[]> {
   }
   // Nothing could be read. Say why with the exact fix, again once a day while it stays broken.
   const msg = errors[0];
+  // A dead token is already reported (once a day) by the Instagram posting run.
+  if (igTokenDead(msg)) return out;
   const prev = await getSetting<{ msg: string; at: string } | string | null>('ig_comments_error');
   const last = prev && typeof prev === 'object' ? prev : undefined;
   if (!last || last.msg !== msg || Date.now() - +new Date(last.at) > 86_400_000) {

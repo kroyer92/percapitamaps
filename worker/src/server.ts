@@ -10,7 +10,7 @@ import { queuePinned } from './pinned.js';
 import { pendingReschedules, rescheduleResult, rescheduleWatch } from './reschedule.js';
 import { produceOne, cleanupOldRenders, requeueTiedRejects, resendLostPreviews, redoLongHookFails, redoTruePeakFails } from './produce.js';
 import { discover } from './discover.js';
-import { instagramDue, linkVideo } from './publish.js';
+import { instagramDue, linkVideo, igTokenSweep } from './publish.js';
 import { dueSnapshots, storeChannel, storeSnapshot, weeklyReport } from './analytics.js';
 import { startBot } from './bot.js';
 import { alert, say, esc } from './telegram.js';
@@ -242,6 +242,8 @@ app.listen(config.port, async () => {
   await redoLongHookFails().catch((e) => console.error('[redo long hooks]', e.message));
   // Videos stopped by the QA gate on true peak before the mix limited it itself (job #88).
   await redoTruePeakFails().catch((e) => console.error('[redo true peak]', e.message));
+  // Instagram posts marked failed after the 25 Nov security check retry once a token works (#97).
+  await igTokenSweep().catch((e) => console.error('[ig token sweep]', e.message));
   // Pinned news Shorts (data/pinned.ts, GTA VI on 25 Nov 2026): queued at the front and made now.
   await queuePinned().catch((e) => console.error('[pinned]', e.message));
 });

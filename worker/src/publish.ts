@@ -116,6 +116,8 @@ export async function linkVideo(id: number, videoId: string, url?: string): Prom
 
 // ---------- Instagram (WF4) ----------
 
+// Where a token is stored: settings 'instagram_token' wins over INSTAGRAM_ACCESS_TOKEN in app/.env,
+// so a token sent with /igtoken in Telegram takes over with no SSH and no restart.
 export async function igToken(): Promise<string> {
   const stored = await getSetting<{ token: string; refreshed_at: string }>('instagram_token');
   let token = stored?.token || config.instagramToken;
@@ -139,24 +141,118 @@ export async function ig(pathPart: string, params: Record<string, string>, metho
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   const res = await fetch(url, { method, signal: AbortSignal.timeout(60_000) });
   const json: any = await res.json();
-  if (json.error) throw new Error(`Instagram: ${json.error.message}`);
+  if (json.error) throw Object.assign(new Error(`Instagram: ${json.error.message}`), { igCode: json.error.code });
   return json;
 }
 
-export async function instagramDue(): Promise<{ posted: number[]; failed: string[]; skipped?: string }> {
+// The token itself is dead (password change, security check, expiry): code 190 / OAuthException.
+// Nothing can be posted until a new one arrives, so posts wait instead of being marked failed.
+export function igTokenDead(e: any): boolean {
+  return e?.igCode === 190 || /Error validating access token|session has been invalidated|access token has expired|Invalid OAuth access token|Cannot parse access token/i.test(String(e?.message ?? e));
+}
+
+export const IG_TOKEN_STEPS = [
+  'Get a new token (works on your phone, takes 2 minutes):',
+  '1. Open the Instagram app once and finish any security check it shows.',
+  '2. Open <b>developers.facebook.com/apps</b> in the phone browser (turn on "Desktop site" if the menu is cut off) → your app → <b>Instagram</b> → <b>API setup with Instagram login</b>.',
+  '3. Under <b>Generate access tokens</b>, tap <b>Generate token</b> next to @PerCapitaMaps (if the account is gone from the list, tap <b>Add account</b> first), log in to Instagram, copy the token.',
+  '4. Paste it here as <code>/igtoken PASTE_TOKEN</code>.',
+  'The bot checks it, deletes your message (so the token is not left in the chat) and posts the waiting Reels right away.',
+].join('\n');
+
+type TokenBroken = { msg: string; since: string; alerted_at?: string };
+
+async function markTokenBroken(msg: string): Promise<void> {
+  const prev = await getSetting<TokenBroken | null>('ig_token_broken');
+  const now = new Date().toISOString();
+  const state: TokenBroken = prev ? { ...prev, msg } : { msg, since: now };
+  // Tell once, then once a day while it stays broken (WF4 runs hourly).
+  if (!state.alerted_at || Date.now() - +new Date(state.alerted_at) > 86_400_000) {
+    const waiting = await q<{ id: number }>(`SELECT id FROM jobs WHERE ig_due_at <= now() AND (ig_status IS NULL OR ig_status = 'failed') AND ig_due_at > now() - interval '7 days' AND video_path IS NOT NULL ORDER BY id`);
+    await say([
+      '⚠️ <b>Instagram token stopped working.</b> Instagram posting, comments and insights are paused; YouTube is not affected.',
+      `Instagram said: ${esc(msg.slice(0, 200))}`,
+      waiting.length ? `Waiting to post: ${waiting.map((w) => `#${w.id}`).join(', ')}. They go up by themselves once the new token is in.` : 'Nothing is lost: posts wait and go up by themselves once the new token is in.',
+      '',
+      IG_TOKEN_STEPS,
+    ].join('\n'));
+    state.alerted_at = now;
+  }
+  await setSetting('ig_token_broken', state);
+}
+
+// The token works again: put the posts that failed while it was broken (and any other failed
+// post from the last 7 days) back in line. The caption check in instagramDue stops a repost of
+// one that did go up.
+async function tokenRecovered(): Promise<number[]> {
+  const prev = await getSetting<TokenBroken | null>('ig_token_broken');
+  if (!prev) return [];
+  await setSetting('ig_token_broken', null);
+  await setSetting('ig_comments_error', null);
+  const back = await q<{ id: number }>(
+    `UPDATE jobs SET ig_status = NULL WHERE ig_status = 'failed' AND ig_media_id IS NULL AND video_path IS NOT NULL
+       AND ig_due_at > now() - interval '7 days' RETURNING id`,
+  );
+  return back.map((b) => b.id).sort((a, b) => a - b);
+}
+
+// Check a token: who it belongs to, or throws Meta's error.
+export async function igWhoAmI(token: string): Promise<{ id?: string; user_id?: string; username?: string }> {
+  return ig('me', { fields: 'id,user_id,username', access_token: token }, 'GET');
+}
+
+// Recent Reels' captions, to never post the same video twice when a retry follows a post that
+// did go up after all.
+async function recentCaptions(token: string): Promise<{ id: string; caption: string }[]> {
+  try {
+    const res = await ig(`${config.instagramUserId}/media`, { fields: 'id,caption', limit: '30', access_token: token }, 'GET');
+    return (res.data ?? []).map((m: any) => ({ id: String(m.id), caption: String(m.caption ?? '') }));
+  } catch (e) {
+    if (igTokenDead(e)) throw e;
+    return [];
+  }
+}
+
+let igRunning: Promise<IgRun> | undefined;
+type IgRun = { posted: number[]; failed: string[]; skipped?: string; recovered?: number[] };
+
+// One run at a time: WF4's hourly call and /igtoken can arrive together.
+export function instagramDue(): Promise<IgRun> {
+  igRunning ??= instagramDueInner().finally(() => { igRunning = undefined; });
+  return igRunning;
+}
+
+async function instagramDueInner(): Promise<IgRun> {
   if (!config.instagramToken || !config.instagramUserId) return { posted: [], failed: [], skipped: 'INSTAGRAM_ACCESS_TOKEN or INSTAGRAM_USER_ID not set in app/.env' };
-  const due = await q<JobRow & { ig_due_at: Date }>(`SELECT * FROM jobs WHERE ig_due_at <= now() AND ig_status IS NULL AND video_path IS NOT NULL ORDER BY ig_due_at LIMIT 3`);
   const posted: number[] = [];
   const failed: string[] = [];
   const token = await igToken();
+  let captions: { id: string; caption: string }[];
+  try {
+    await igWhoAmI(token);
+    captions = await recentCaptions(token);
+  } catch (e: any) {
+    if (!igTokenDead(e)) throw e;
+    await markTokenBroken(String(e.message ?? e).replace(/^Instagram: /, ''));
+    return { posted, failed, skipped: 'token dead, posts wait' };
+  }
+  const recovered = await tokenRecovered();
+  if (recovered.length) await say(`✅ Instagram token works again. Posting ${recovered.map((id) => `#${id}`).join(', ')} now (up to 3 per hour).`);
+  const due = await q<JobRow & { ig_due_at: Date }>(`SELECT * FROM jobs WHERE ig_due_at <= now() AND ig_status IS NULL AND video_path IS NOT NULL ORDER BY ig_due_at LIMIT 3`);
   for (const job of due) {
+    const caption = [job.packaging.ig_caption, '', job.facts.source_line, '', (job.packaging.ig_hashtags ?? []).join(' ')].join('\n');
+    const own = (job.packaging.ig_caption ?? '').trim();
+    const already = own.length >= 20 ? captions.find((c) => c.caption.trim().startsWith(own)) : undefined;
+    if (already) {
+      await q(`UPDATE jobs SET ig_status = 'posted', ig_media_id = $2 WHERE id = $1`, [job.id, already.id]);
+      continue;
+    }
     office.working('publisher', `Posting #${job.id} to Instagram`, job.id);
     const name = `${crypto.randomBytes(12).toString('hex')}.mp4`;
     const file = path.join(config.mediaDir, 'ig', name);
     try {
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.copyFile(job.video_path!, file);
-      const caption = [job.packaging.ig_caption, '', job.facts.source_line, '', (job.packaging.ig_hashtags ?? []).join(' ')].join('\n');
       const container = await ig(`${config.instagramUserId}/media`, { media_type: 'REELS', video_url: `https://${config.mediaDomain}/ig/${name}`, caption, share_to_feed: 'true', access_token: token });
       let status = 'IN_PROGRESS';
       for (let i = 0; i < 40 && status !== 'FINISHED'; i++) {
@@ -170,6 +266,12 @@ export async function instagramDue(): Promise<{ posted: number[]; failed: string
       posted.push(job.id);
       office.finished('publisher', `#${job.id} is live on Instagram`, job.id);
     } catch (e: any) {
+      if (igTokenDead(e)) {
+        // Not this video's fault: it stays in line and goes up once the token is replaced.
+        await markTokenBroken(String(e.message ?? e).replace(/^Instagram: /, ''));
+        office.failed('publisher', `Instagram token stopped working; #${job.id} waits`, job.id);
+        break;
+      }
       await q(`UPDATE jobs SET ig_status = 'failed' WHERE id = $1`, [job.id]);
       failed.push(`#${job.id}: ${e.message}`);
       office.failed('publisher', `Instagram refused #${job.id}: ${e.message}`, job.id);
@@ -177,5 +279,37 @@ export async function instagramDue(): Promise<{ posted: number[]; failed: string
       await fs.rm(file, { force: true });
     }
   }
-  return { posted, failed };
+  return { posted, failed, recovered };
+}
+
+// /igtoken <token> from Telegram: check it, store it (it wins over app/.env), post what waits.
+export async function setIgToken(token: string): Promise<string> {
+  token = token.trim();
+  if (token.length < 40 || /\s/.test(token)) return 'That does not look like a token. Copy the whole token and send <code>/igtoken PASTE_TOKEN</code>.';
+  let me: { id?: string; user_id?: string; username?: string };
+  try {
+    me = await igWhoAmI(token);
+  } catch (e: any) {
+    return `❌ Instagram refused that token, nothing changed.\n${esc(String(e.message ?? e).slice(0, 200))}\n\n${IG_TOKEN_STEPS}`;
+  }
+  const ids = [me.id, me.user_id].filter(Boolean).map(String);
+  if (config.instagramUserId && !ids.includes(String(config.instagramUserId))) {
+    return `❌ That token is for @${esc(me.username ?? '?')}, not the account the pipeline posts to (INSTAGRAM_USER_ID ${esc(config.instagramUserId)}). Nothing changed. Generate the token next to @PerCapitaMaps.`;
+  }
+  await setSetting('instagram_token', { token, refreshed_at: new Date().toISOString() });
+  // Make sure the next run sees a change, also when no run noticed the old token was dead yet.
+  if (!(await getSetting<TokenBroken | null>('ig_token_broken'))) await setSetting('ig_token_broken', { msg: 'replaced with /igtoken', since: new Date().toISOString(), alerted_at: new Date().toISOString() });
+  return `✅ New Instagram token saved for @${esc(me.username ?? '?')}. It renews itself every 20 days. Posting the waiting Reels now.`;
+}
+
+// Once (25 Nov 2026): #97 and any post after Instagram's security check were marked failed before
+// posts learned to wait for a new token. Mark the token as broken so they are retried the moment a
+// working token is seen (and the steps arrive in Telegram if it is still dead).
+export async function igTokenSweep(): Promise<void> {
+  if (await getSetting<boolean>('ig_token_sweep_2026_11_25')) return;
+  await setSetting('ig_token_sweep_2026_11_25', true);
+  const failed = await one<{ n: number }>(`SELECT count(*)::int AS n FROM jobs WHERE ig_status = 'failed' AND ig_media_id IS NULL AND ig_due_at > now() - interval '7 days'`);
+  if (failed?.n && !(await getSetting<TokenBroken | null>('ig_token_broken'))) {
+    await setSetting('ig_token_broken', { msg: 'session invalidated (25 Nov security check)', since: new Date().toISOString() });
+  }
 }
