@@ -5,7 +5,7 @@ import { one, q, getSetting, setSetting } from './db.js';
 import { tg, say, esc } from './telegram.js';
 import { queue } from './lib/queue.js';
 import { produceOne, swapHook, type JobRow } from './produce.js';
-import { approve, linkVideo, parseVideoId } from './publish.js';
+import { approve, linkVideo, parseVideoId, setIgToken, instagramDue } from './publish.js';
 import { queueFollowup } from './followups.js';
 import { requestReplacement } from './replace.js';
 import { fmtIn } from './lib/time.js';
@@ -29,6 +29,7 @@ const HELP = [
   '/tune [on|off|reset] – see or undo the weekly hook/length auto-tuning',
   '/opening – how the Map Reveal opening test is going, and whether it can be read yet',
   '/nation [test|make|remove n] – Per Capita Nation: citizens, vote, the daily episode',
+  '/igtoken &lt;token&gt; – put in a new Instagram token (the bot checks it, deletes your message and posts what waits)',
   '/status – queue, waiting approvals and next slots',
   '/help – this list',
 ].join('\n');
@@ -54,7 +55,21 @@ async function status(): Promise<string> {
   ].join('\n');
 }
 
-async function onMessage(text: string): Promise<void> {
+// After a new token: post what waited, and say how it went.
+async function instagramNow(): Promise<void> {
+  try {
+    const r = await instagramDue();
+    if (r.posted.length) await say(`📸 Posted to Instagram: ${r.posted.map((id) => `#${id}`).join(', ')}`);
+    if (r.failed.length) await say(`⚠️ Instagram failed: ${esc(r.failed.join('; '))}`);
+    if (!r.posted.length && !r.failed.length && !r.skipped) await say('📸 Instagram is working. Nothing is due right now; the next Reel goes up on schedule.');
+  } catch (e: any) {
+    await say(`⚠️ Instagram run failed: ${esc(String(e.message ?? e))}`);
+  }
+}
+
+async function onMessage(text: string, messageId?: number): Promise<void> {
+  // A token pasted on its own (Instagram tokens start with IG) counts as /igtoken.
+  if (/^IG[A-Za-z0-9_-]{80,}$/.test(text.trim())) text = `/igtoken ${text.trim()}`;
   const [cmdRaw, ...args] = text.trim().split(/\s+/);
   const cmd = cmdRaw.toLowerCase().replace(/@.*$/, '');
   switch (cmd) {
@@ -65,6 +80,15 @@ async function onMessage(text: string): Promise<void> {
     case '/status':
       await say(await status());
       return;
+    case '/igtoken': {
+      // The token should not stay in the chat history.
+      if (messageId) await tg('deleteMessage', { chat_id: config.telegramChatId, message_id: messageId }).catch(() => undefined);
+      if (!args[0]) { await say('Use it like this: <code>/igtoken PASTE_TOKEN</code>'); return; }
+      const reply = await setIgToken(args.join(''));
+      await say(reply);
+      if (reply.startsWith('✅')) void instagramNow();
+      return;
+    }
     case '/produce': {
       const n = Math.min(10, Math.max(1, Number(args[0]) || 1));
       for (let i = 0; i < n; i++) queue.add('produce', async () => { await produceOne(); });
@@ -185,6 +209,7 @@ export async function startBot(): Promise<void> {
       { command: 'longform', description: 'Make the long-form video now' },
       { command: 'opening', description: 'Map Reveal opening test: can it be read yet?' },
       { command: 'nation', description: 'Per Capita Nation: citizens, vote, episode' },
+      { command: 'igtoken', description: 'New Instagram token: /igtoken <token>' },
       { command: 'help', description: 'All commands' },
     ],
   }).catch(() => undefined);
@@ -199,7 +224,7 @@ export async function startBot(): Promise<void> {
         if (chat !== String(config.telegramChatId)) continue; // only you can control the bot
         try {
           if (u.callback_query) await onCallback(u.callback_query);
-          else if (u.message?.text) await onMessage(u.message.text);
+          else if (u.message?.text) await onMessage(u.message.text, u.message.message_id);
         } catch (e: any) {
           console.error('[bot]', e);
           await say(`⚠️ ${esc(String(e.message ?? e))}`).catch(() => undefined);

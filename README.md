@@ -259,6 +259,14 @@ same way, from every Reel on the account in the last 30 days (also ones posted b
 needs `instagram_business_manage_comments`; while Instagram can't be read, Telegram says why and
 gives the exact fix once a day, and one broken or deleted Reel never hides the others.
 
+**Instagram token.** A token sent in Telegram with `/igtoken <token>` (or just pasted, it starts
+with `IG`) is checked against the account, saved in Postgres settings `instagram_token` (it wins
+over `INSTAGRAM_ACCESS_TOKEN` in app/.env and renews itself every 20 days) and the bot deletes the
+message. When Meta kills the token (password change, security check: code 190), Reels are not
+marked failed: they wait, Telegram gets the steps once a day, and once a working token is seen,
+every Reel that failed in the last 7 days is retried. A Reel whose caption is already on the
+account is marked posted instead of being posted twice.
+
 - **Numbers only from the video's own data.** A comment that names countries ("what about
   Vietnam?", "as a German…", "I guessed Qatar") gets their rank and value from the same ranking
   the video showed, in Niko's format: opener, `Same World Bank data (2024): …`, highest first,
