@@ -6,6 +6,8 @@ import { config } from './config.js';
 import { applySchema, one, q } from './db.js';
 import { queue } from './lib/queue.js';
 import { deletionResult, mapFixSweep, n8nInstalled, pendingDeletions, replacementUploaded, tick as replaceTick } from './replace.js';
+import { queuePinned } from './pinned.js';
+import { pendingReschedules, rescheduleResult, rescheduleWatch } from './reschedule.js';
 import { produceOne, cleanupOldRenders, requeueTiedRejects, resendLostPreviews, redoLongHookFails, redoTruePeakFails } from './produce.js';
 import { discover } from './discover.js';
 import { instagramDue, linkVideo } from './publish.js';
@@ -92,6 +94,12 @@ app.get('/jobs/:id', async (req, res) => {
   res.json(job);
 });
 
+// WF8: Shorts moved back a slot for a pinned Short, whose YouTube time still has to change.
+app.get('/youtube/reschedules', async (_req, res) => res.json(await pendingReschedules()));
+app.post('/youtube/reschedules/:id', async (req, res) => {
+  await rescheduleResult(Number(req.params.id), { ok: !!req.body?.ok, detail: req.body?.detail ? String(req.body.detail).slice(0, 400) : undefined });
+  res.json({ ok: true });
+});
 // The server's delete step (tools/autodeploy/youtube-delete.py): which old scheduled videos to
 // delete now that their replacement is uploaded, and how it went.
 app.get('/youtube/deletions', async (_req, res) => res.json(await pendingDeletions()));
@@ -206,6 +214,7 @@ setInterval(async () => {
 
 // Scheduled Shorts being swapped for a new render (replace.ts).
 setInterval(() => { replaceTick().catch((e) => console.error('[replace]', e.message)); }, 2 * 60_000);
+setInterval(() => { rescheduleWatch().catch((e) => console.error('[reschedule]', e.message)); }, 2 * 60_000);
 
 // Per Capita Nation: the daily census when it's due, and the episode's approval before its slot.
 setInterval(() => { nationTick().catch((e) => console.error('[nation]', e.message)); }, 2 * 60_000);
@@ -233,4 +242,6 @@ app.listen(config.port, async () => {
   await redoLongHookFails().catch((e) => console.error('[redo long hooks]', e.message));
   // Videos stopped by the QA gate on true peak before the mix limited it itself (job #88).
   await redoTruePeakFails().catch((e) => console.error('[redo true peak]', e.message));
+  // Pinned news Shorts (data/pinned.ts, GTA VI on 25 Nov 2026): queued at the front and made now.
+  await queuePinned().catch((e) => console.error('[pinned]', e.message));
 });

@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS topics (
   fail_count     int NOT NULL DEFAULT 0,
   angle_hash     text NOT NULL,
   embedding      vector(768),
-  source         text NOT NULL DEFAULT 'discover',   -- launch | discover | followup
+  source         text NOT NULL DEFAULT 'discover',   -- pinned | launch | discover | followup
   concept_key    text,
   status         text NOT NULL DEFAULT 'idea',       -- idea | producing | done | failed | skipped
   created_at     timestamptz NOT NULL DEFAULT now(),

@@ -11,6 +11,7 @@ import { fmtIn, upcomingSlots } from './lib/time.js';
 import type { JobRow } from './produce.js';
 import * as office from './activity.js';
 import { approveNation } from './nation/make.js';
+import { jumpQueue, jumpText } from './reschedule.js';
 
 const PLAYLIST_NAMES: Record<Format, string> = {
   MAP_REVEAL: 'Map Reveals', COUNTDOWN: 'Top 10 Countdowns', THEN_NOW: 'Then vs Now', SCALE: 'If the World Were 100 People', GUESS: 'Guess the Country',
@@ -33,12 +34,14 @@ export async function approve(id: number): Promise<void> {
   }
   // Per Capita Nation episodes keep their own daily slot and packaging (nation/make.ts).
   if (isNation(job.format)) return approveNation(job);
-  const slot = await nextSlot();
+  const topic = await one<{ question: string; source: string }>('SELECT question, source FROM topics WHERE id = $1', [job.topic_id]);
+  // A pinned Short takes the next normal slot and the queue moves back one slot (reschedule.ts).
+  const jump = topic?.source === 'pinned' ? await jumpQueue(id) : undefined;
+  const slot = jump?.slot ?? (await nextSlot());
   const series = config.seriesNaming
     ? ((await one<{ n: number }>(`SELECT count(*)::int AS n FROM jobs WHERE format = $1 AND series_no IS NOT NULL`, [job.format]))?.n ?? 0) + 1
     : null;
   // Jobs written before the packaging check existed can still name the answer.
-  const topic = await one<{ question: string }>('SELECT question FROM topics WHERE id = $1', [job.topic_id]);
   hideAnswer(job.packaging, job.facts, job.format, topic?.question ?? job.facts.title);
   const title = seriesTitle(job.packaging.title, job.format, series ?? undefined);
   const description = buildDescription(job.packaging, job.facts, job.render?.music?.credit);
@@ -52,7 +55,7 @@ export async function approve(id: number): Promise<void> {
   const playlist = config.playlists[job.format] ? PLAYLIST_NAMES[job.format] : `${PLAYLIST_NAMES[job.format]} (no ID in app/.env yet)`;
   if (config.youtubeApiUploads) {
     await handToN8n(job, packaging, slot);
-    await say(`✅ Approved #${id}. Uploading through the YouTube API, scheduled for ${when}.`);
+    await say(`✅ Approved #${id}. Uploading through the YouTube API, scheduled for ${when}.${jump ? jumpText(jump) : ''}`);
     return;
   }
   await say([

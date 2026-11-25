@@ -15,6 +15,7 @@ n8n (schedules, YouTube credentials)          render-worker (this repo, worker/)
   WF4 Instagram hourly ───────────────────►  POST /instagram/run
   WF5 Analyze   every 6 h, Sun 18:00 ─────►  /analytics/due, /analytics/snapshot, /report/weekly
   WF6 Comments  hourly at :40 ────────────►  POST /comments/youtube   new comments → checked reply → Telegram
+  WF7 Delete replaced video, WF8 Reschedule moved Shorts  every 5 min (auto-installed from n8n/workflows/auto/)
   WF0 Errors    any failure → Telegram
 ```
 

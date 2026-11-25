@@ -41,6 +41,7 @@ export interface Facts {
   guess?: { options: { letter: string; iso3: string; name: string }[]; answer: string };
   map: Record<string, number>;
   decimals: number;
+  note?: string; // extra description line from the dataset (where an outside number comes from)
 }
 
 export interface BottomTie {
@@ -189,6 +190,7 @@ export function buildFacts({ ds, series, population, format }: BuildInput): Fact
     anchors,
     map: Object.fromEntries(ranking.map((r) => [r.iso3, r.value])),
     decimals: ds.decimals ?? 0,
+    ...(ds.note ? { note: ds.note } : {}),
   };
 
   if (ds.threshold) {

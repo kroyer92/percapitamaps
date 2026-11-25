@@ -123,8 +123,8 @@ async function claimTopic(preferred: Format, onlyTopic?: number, exclude: number
      WHERE id = (
        SELECT t.id FROM topics t JOIN datasets d ON d.id = t.dataset_id
        WHERE t.status = 'idea' AND d.enabled AND NOT (t.id = ANY($3::bigint[]))
-         AND (t.source IN ('launch','followup') OR d.last_used_at IS NULL OR d.last_used_at < now() - interval '21 days')
-       ORDER BY (t.source = 'launch') DESC, CASE WHEN t.source = 'launch' THEN t.priority END DESC NULLS LAST,
+         AND (t.source IN ('pinned','launch','followup') OR d.last_used_at IS NULL OR d.last_used_at < now() - interval '21 days')
+       ORDER BY (t.source = 'pinned') DESC, (t.source = 'launch') DESC, CASE WHEN t.source IN ('pinned','launch') THEN t.priority END DESC NULLS LAST,
          (t.format = $1) DESC, (t.format = $2) ASC, t.priority DESC, t.id
        LIMIT 1 FOR UPDATE SKIP LOCKED)
      RETURNING *`,
@@ -169,7 +169,9 @@ export async function produceOne(skips = 0, retry = 0, onlyTopic?: number, exclu
   }
   const ds = await getDataset(topic.dataset_id);
   const blocked = await blockedFormat();
-  let format: Format = config.formats.includes(topic.format) && topic.format !== blocked ? topic.format : preferred;
+  // A pinned topic (data/pinned.ts) was planned for its format, so it keeps it.
+  const pinned = topic.source === 'pinned';
+  let format: Format = config.formats.includes(topic.format) && (pinned || topic.format !== blocked) ? topic.format : preferred;
   format = fitFormat(format, ds);
 
   const n = await nthJob();
@@ -226,7 +228,8 @@ export async function produceOne(skips = 0, retry = 0, onlyTopic?: number, exclu
     const recentLines = recent.map((r) => (r.script?.beats ?? []).map((b) => b.vo ?? ''));
     // Only Map Reveals that could take either opening are in the test, so both get the same kind of
     // topic. One without a famous country ranked 2nd to 15th keeps the classic and sits the test out.
-    const strip = format === 'MAP_REVEAL' ? openingFor(facts) : undefined;
+    // A pinned news topic sits the test out too: its views say more about the news than the opening.
+    const strip = format === 'MAP_REVEAL' && !pinned ? openingFor(facts) : undefined;
     const opening = strip && (await pickOpening(strip));
     if (strip) await q('UPDATE jobs SET opening = $2 WHERE id = $1', [id, opening ? 'rank_strip' : 'classic']);
     takeModelsUsed(); // forget the topic checks; record only the models that write this video
@@ -342,7 +345,7 @@ export async function sendPreview(id: number): Promise<void> {
     ...(job.format === 'MAP_REVEAL' ? [`<b>Opening test:</b> ${openingText(job)}`] : []),
     ...hooks.map((h, i) => `${i === job.chosen_hook ? '▶' : `${i + 1}.`} ${esc(h.type)}: ${esc(h.text)}`),
     `<b>Title:</b> ${esc(job.packaging.title)}`,
-    `<b>Why this video:</b> ${esc(topic.trend_link ? `rides "${topic.trend_link}"` : topic.source === 'launch' ? 'launch concept' : topic.source === 'followup' ? 'follow-up to a winner' : 'evergreen angle')}${topic.expected_twist ? ` · ${esc(topic.expected_twist)}` : ''}`,
+    `<b>Why this video:</b> ${esc(topic.trend_link ? `rides "${topic.trend_link}"` : topic.source === 'pinned' ? 'pinned to the front of the queue' : topic.source === 'launch' ? 'launch concept' : topic.source === 'followup' ? 'follow-up to a winner' : 'evergreen angle')}${topic.expected_twist ? ` · ${esc(topic.expected_twist)}` : ''}`,
     `<b>Source:</b> ${esc(job.facts.source_line)}`,
     esc(qaSummary(job.qa!)),
   ];

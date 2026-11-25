@@ -111,7 +111,7 @@ async function ypp() {
 }
 
 function why(t: { trend_link: string | null; source: string; expected_twist: string | null }): string {
-  const base = t.trend_link ? `Trending: "${t.trend_link}"` : t.source === 'launch' ? 'Launch concept' : t.source === 'followup' ? 'Follow-up to a winner' : 'Evergreen angle';
+  const base = t.trend_link ? `Trending: "${t.trend_link}"` : t.source === 'pinned' ? 'Pinned to the front of the queue' : t.source === 'launch' ? 'Launch concept' : t.source === 'followup' ? 'Follow-up to a winner' : 'Evergreen angle';
   return t.expected_twist ? `${base}. ${t.expected_twist}` : base;
 }
 
@@ -124,7 +124,7 @@ async function whiteboard() {
   const ideas = await q<{ id: number; question: string; format: Format; trend_link: string | null; source: string; expected_twist: string | null }>(
     `SELECT t.id, t.question, t.format, t.trend_link, t.source, t.expected_twist FROM topics t JOIN datasets d ON d.id = t.dataset_id
      WHERE t.status = 'idea' AND d.enabled
-     ORDER BY (t.source = 'launch') DESC, CASE WHEN t.source = 'launch' THEN t.priority END DESC NULLS LAST, t.priority DESC, t.id
+     ORDER BY (t.source = 'pinned') DESC, (t.source = 'launch') DESC, CASE WHEN t.source IN ('pinned','launch') THEN t.priority END DESC NULLS LAST, t.priority DESC, t.id
      LIMIT 6`);
   const notes = [
     ...jobs.map((j) => ({
