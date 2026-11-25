@@ -54,6 +54,8 @@ export const PINNED_DATASETS: CatalogEntry[] = [
   },
 ];
 
+// A question shows in full as the hook's headline only at 9 words or fewer (content.ts); longer
+// ones were cut to 6 words on screen (job #103), so keep every question to 9 words.
 export interface PinnedTopic { key: string; dataset: string; format: Format; question: string; twist: string }
 
 // In the order they should go out.
@@ -62,14 +64,14 @@ export const PINNED_TOPICS: PinnedTopic[] = [
     key: 'gta6_day_one',
     dataset: 'gta6_day_one_vs_gdp',
     format: 'MAP_REVEAL',
-    question: "Which economy does GTA 6's first day dwarf the most?",
+    question: "Which economy does GTA 6's first day dwarf most?",
     twist: 'GTA 6 sold $3.79 billion on its first day: more than the whole yearly economy of a handful of real countries.',
   },
   {
     key: 'gta6_days_income',
     dataset: 'gta6_days_of_income',
     format: 'COUNTDOWN',
-    question: 'Where does GTA 6 cost the most days of income?',
+    question: 'Where does GTA 6 cost most days of income?',
     twist: 'At the US price of $79.99, GTA 6 costs a few hours of income in rich countries and months in others.',
   },
 ];

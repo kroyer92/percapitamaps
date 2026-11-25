@@ -8,7 +8,8 @@ import { getDataset, upsertDataset } from './datasets.js';
 import { checkDatasets } from './cli/check-datasets.js';
 import { angleHash } from './discover.js';
 import { loadFacts } from './facts.js';
-import { produceOne } from './produce.js';
+import { produceOne, renderAndPreview, type JobRow } from './produce.js';
+import { wordCount } from './validate.js';
 import { queue } from './lib/queue.js';
 import { esc, say } from './telegram.js';
 
@@ -21,6 +22,8 @@ export async function queuePinned(attempt = 0): Promise<void> {
   const ids = PINNED_TOPICS.map((t) => t.dataset);
   const stale = await q<{ id: string }>(`SELECT id FROM datasets WHERE id = ANY($1) AND (NOT enabled OR verified_at IS NULL OR resolved_ref IS NULL)`, [ids]);
   if (stale.length) await checkDatasets(stale.map((r) => r.id));
+
+  await syncQuestions();
 
   const lines: string[] = [];
   const made: number[] = [];
@@ -63,5 +66,24 @@ export async function queuePinned(attempt = 0): Promise<void> {
   }
   if (waiting && attempt < RECHECKS) {
     setTimeout(() => void queuePinned(attempt + 1).catch((e) => console.error('[pinned]', e.message)), RECHECK_MINUTES * 60_000);
+  }
+}
+
+// A question changed in data/pinned.ts after its topic was queued (job #103: a 10-word question was
+// cut to "Which economy does GTA 6's first" on screen). The topic takes the new wording, and a
+// preview still waiting for approval is rendered again with it as the hook's headline, same voice
+// and script; the new preview replaces the old one.
+async function syncQuestions(): Promise<void> {
+  for (const t of PINNED_TOPICS) {
+    const topic = await one<{ id: number; question: string }>(`SELECT id, question FROM topics WHERE concept_key = $1 AND source = 'pinned'`, [t.key]);
+    if (!topic || topic.question === t.question) continue;
+    await q('UPDATE topics SET question = $2 WHERE id = $1', [topic.id, t.question]);
+    const jobs = await q<JobRow>(`SELECT * FROM jobs WHERE topic_id = $1 AND status = 'awaiting_approval' AND script IS NOT NULL`, [topic.id]);
+    for (const job of jobs) {
+      const beats = job.script.beats.map((b, i) => (i === 0 && wordCount(t.question) <= 9 ? { ...b, on_screen: t.question } : b));
+      await q('UPDATE jobs SET script = $2, updated_at = now() WHERE id = $1', [job.id, { ...job.script, beats }]);
+      queue.add(`re-render #${job.id} (full question)`, async () => { await renderAndPreview(job.id, true); });
+      await say(`🔁 #${job.id} is being rendered again: its question was too long, so the screen showed only "${esc(job.script.beats[0].on_screen)}". The new preview shows "${esc(t.question)}" in full and replaces the old one. Nothing to do.`);
+    }
   }
 }
