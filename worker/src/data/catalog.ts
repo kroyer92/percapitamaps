@@ -27,6 +27,8 @@ export interface CatalogEntry {
   minCountries?: number;
   lowerIsNews?: boolean;  // the interesting end of the ranking is the bottom
   yearPrefix?: string;    // when the year is not the measuring year, e.g. 'born ' for height by birth year
+  pinned?: boolean;       // a one-off pinned topic's dataset (data/pinned.ts): never offered to the idea finder
+  note?: string;          // an extra line for the YouTube description (where an outside number comes from)
 }
 
 const wb = (indicator: string): SourceRef => ({ kind: 'worldbank', indicator });

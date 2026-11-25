@@ -6,6 +6,7 @@ import { config } from './config.js';
 import { applySchema, one, q } from './db.js';
 import { queue } from './lib/queue.js';
 import { deletionResult, mapFixSweep, n8nInstalled, pendingDeletions, replacementUploaded, tick as replaceTick } from './replace.js';
+import { queuePinned } from './pinned.js';
 import { produceOne, cleanupOldRenders, requeueTiedRejects, resendLostPreviews, redoLongHookFails, redoTruePeakFails } from './produce.js';
 import { discover } from './discover.js';
 import { instagramDue, linkVideo } from './publish.js';
@@ -233,4 +234,6 @@ app.listen(config.port, async () => {
   await redoLongHookFails().catch((e) => console.error('[redo long hooks]', e.message));
   // Videos stopped by the QA gate on true peak before the mix limited it itself (job #88).
   await redoTruePeakFails().catch((e) => console.error('[redo true peak]', e.message));
+  // Pinned news Shorts (data/pinned.ts, GTA VI on 25 Nov 2026): queued at the front and made now.
+  await queuePinned().catch((e) => console.error('[pinned]', e.message));
 });

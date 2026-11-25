@@ -16,12 +16,15 @@ const PLAYLIST_NAMES: Record<Format, string> = {
   MAP_REVEAL: 'Map Reveals', COUNTDOWN: 'Top 10 Countdowns', THEN_NOW: 'Then vs Now', SCALE: 'If the World Were 100 People', GUESS: 'Guess the Country',
 };
 
-export async function nextSlot(): Promise<Date> {
-  const taken = new Set(
-    (await q<{ slot_at: Date }>(`SELECT slot_at FROM jobs WHERE slot_at IS NOT NULL AND slot_at > now()`)).map((r) => +new Date(r.slot_at)),
-  );
+// The first free publishing time. A pinned Short may also use the extra PRIORITY_SLOTS times, so it
+// goes out at the next free one of either list, ahead of every Short already scheduled; no scheduled
+// Short is moved. A free time within 2 hours of another Short is skipped, so two never land together.
+export async function nextSlot(pinned = false): Promise<Date> {
+  const taken = (await q<{ slot_at: Date }>(`SELECT slot_at FROM jobs WHERE slot_at IS NOT NULL AND slot_at > now() - interval '2 hours'`)).map((r) => +new Date(r.slot_at));
   const soonest = new Date(Date.now() + 60 * 60_000);
-  return upcomingSlots(config.publishSlots, config.slotTz, soonest, 30).find((s) => !taken.has(+s)) ?? soonest;
+  const times = pinned ? [...config.publishSlots, ...config.prioritySlots] : config.publishSlots;
+  const free = (s: Date) => (pinned ? taken.every((t) => Math.abs(t - +s) >= 2 * 3_600_000) : !taken.includes(+s));
+  return upcomingSlots(times, config.slotTz, soonest, 30).find(free) ?? soonest;
 }
 
 export async function approve(id: number): Promise<void> {
@@ -33,12 +36,12 @@ export async function approve(id: number): Promise<void> {
   }
   // Per Capita Nation episodes keep their own daily slot and packaging (nation/make.ts).
   if (isNation(job.format)) return approveNation(job);
-  const slot = await nextSlot();
+  const topic = await one<{ question: string; source: string }>('SELECT question, source FROM topics WHERE id = $1', [job.topic_id]);
+  const slot = await nextSlot(topic?.source === 'pinned');
   const series = config.seriesNaming
     ? ((await one<{ n: number }>(`SELECT count(*)::int AS n FROM jobs WHERE format = $1 AND series_no IS NOT NULL`, [job.format]))?.n ?? 0) + 1
     : null;
   // Jobs written before the packaging check existed can still name the answer.
-  const topic = await one<{ question: string }>('SELECT question FROM topics WHERE id = $1', [job.topic_id]);
   hideAnswer(job.packaging, job.facts, job.format, topic?.question ?? job.facts.title);
   const title = seriesTitle(job.packaging.title, job.format, series ?? undefined);
   const description = buildDescription(job.packaging, job.facts, job.render?.music?.credit);

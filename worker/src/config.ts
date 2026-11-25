@@ -62,6 +62,9 @@ export const config = {
   playlistLongform: env.PLAYLIST_LONGFORM ?? '',
   // Publishing slots in US Eastern time; the bot also shows them in LOCAL_TZ.
   publishSlots: list(env.PUBLISH_SLOTS || '13:00,19:00'),
+  // Extra times only a pinned Short (data/pinned.ts) may use, so it goes out next instead of after
+  // everything already scheduled. Also US Eastern.
+  prioritySlots: list(env.PRIORITY_SLOTS || '10:00,16:30'),
   slotTz: env.SLOT_TZ || 'America/New_York',
   localTz: env.LOCAL_TZ || 'Europe/Copenhagen',
   youtubeApiUploads: (env.YOUTUBE_API_UPLOADS ?? 'off').toLowerCase() === 'on',

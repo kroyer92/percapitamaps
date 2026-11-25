@@ -134,6 +134,7 @@ export function buildDescription(p: Packaging, facts: Facts, musicCredit?: strin
     '',
     `Source: ${facts.source_line.replace(/^Data: /, '')} ${facts.source_url}`,
     `Method: latest year with data for ${facts.countries_count} countries; regional aggregates and territories under 300,000 people removed.`,
+    facts.note ?? '',
     musicCredit ? `Music: ${musicCredit}` : '',
     '',
     'Spotted a mistake? Say so in the comments. Corrections get pinned.',
