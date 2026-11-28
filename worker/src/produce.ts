@@ -14,6 +14,7 @@ import { MAP_VERSION, renderShort } from './render.js';
 import { runQa, qaSummary, type QaReport } from './qa.js';
 import { esc, sendVideo, say, alert, type Keyboard } from './telegram.js';
 import { fitFormat, pickFormat, blockedFormat } from './formats.js';
+import { hotTurn } from './hot.js';
 import { pickVariant } from './tune.js';
 import { chosenOpening } from './analytics.js';
 import { localDate } from './lib/time.js';
@@ -114,21 +115,25 @@ async function pickOpening(strip: Opening): Promise<Opening | undefined> {
   return s < k || (s === k && c?.last !== 'rank_strip') ? strip : undefined;
 }
 
-async function claimTopic(preferred: Format, onlyTopic?: number, exclude: number[] = []) {
+export async function claimTopic(preferred: Format, onlyTopic?: number, exclude: number[] = []) {
   // A topic sent back by the code (redoTopic) is claimed by id, so that exact video is made next.
   if (onlyTopic) return one<any>(`UPDATE topics SET status = 'producing' WHERE id = $1 AND status = 'idea' RETURNING *`, [onlyTopic]);
   const blocked = (await blockedFormat()) ?? '';
+  // Every other video is an argue-about topic (hot.ts); the rest are the control. When one side has
+  // nothing waiting, the other side's topic is made rather than no video.
+  const hot = await hotTurn();
   return one<any>(
     `UPDATE topics SET status = 'producing'
      WHERE id = (
        SELECT t.id FROM topics t JOIN datasets d ON d.id = t.dataset_id
        WHERE t.status = 'idea' AND d.enabled AND NOT (t.id = ANY($3::bigint[]))
-         AND (t.source IN ('pinned','launch','followup') OR d.last_used_at IS NULL OR d.last_used_at < now() - interval '21 days')
-       ORDER BY (t.source = 'pinned') DESC, (t.source = 'launch') DESC, CASE WHEN t.source IN ('pinned','launch') THEN t.priority END DESC NULLS LAST,
+         AND (t.source IN ('pinned','launch','followup') OR (t.source = 'hot' AND d.spec->>'pinned' = 'true') OR d.last_used_at IS NULL OR d.last_used_at < now() - interval '21 days')
+       ORDER BY (t.source = 'pinned') DESC, ((t.source = 'hot') = $4) DESC, (t.source = 'launch') DESC,
+         CASE WHEN t.source IN ('pinned','launch','hot') THEN t.priority END DESC NULLS LAST,
          (t.format = $1) DESC, (t.format = $2) ASC, t.priority DESC, t.id
        LIMIT 1 FOR UPDATE SKIP LOCKED)
      RETURNING *`,
-    [preferred, blocked, exclude],
+    [preferred, blocked, exclude, hot],
   );
 }
 
@@ -233,7 +238,7 @@ export async function produceOne(skips = 0, retry = 0, onlyTopic?: number, exclu
     const opening = strip && (await pickOpening(strip));
     if (strip) await q('UPDATE jobs SET opening = $2 WHERE id = $1', [id, opening ? 'rank_strip' : 'classic']);
     takeModelsUsed(); // forget the topic checks; record only the models that write this video
-    const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined, opening, recentLines, onStep: (step) => { console.log(`[job ${id}] ${step}`); office.working('writer', step, id); } });
+    const content = await generateContent({ question: topic.question, format, facts, twist: topic.expected_twist, lengthBand: lengthBand ?? undefined, hookType: hookType ?? undefined, opening, recentLines, hot: topic.source === 'hot', onStep: (step) => { console.log(`[job ${id}] ${step}`); office.working('writer', step, id); } });
     await q(
       `UPDATE jobs SET script = $2, hooks = $3, packaging = $4, critic = $5, chosen_hook = $6, hook_type = $7, status = 'rendering', updated_at = now() WHERE id = $1`,
       [id, { ...content.script, models: takeModelsUsed() }, { list: content.hooks, original: content.originalHook }, content.packaging, content.critic, content.chosenHook, content.hookType],
@@ -345,7 +350,7 @@ export async function sendPreview(id: number): Promise<void> {
     ...(job.format === 'MAP_REVEAL' ? [`<b>Opening test:</b> ${openingText(job)}`] : []),
     ...hooks.map((h, i) => `${i === job.chosen_hook ? '▶' : `${i + 1}.`} ${esc(h.type)}: ${esc(h.text)}`),
     `<b>Title:</b> ${esc(job.packaging.title)}`,
-    `<b>Why this video:</b> ${esc(topic.trend_link ? `rides "${topic.trend_link}"` : topic.source === 'pinned' ? 'pinned to the front of the queue' : topic.source === 'launch' ? 'launch concept' : topic.source === 'followup' ? 'follow-up to a winner' : 'evergreen angle')}${topic.expected_twist ? ` · ${esc(topic.expected_twist)}` : ''}`,
+    `<b>Why this video:</b> ${esc(topic.trend_link ? `rides "${topic.trend_link}"` : topic.source === 'pinned' ? 'pinned to the front of the queue' : topic.source === 'hot' ? 'argue-about slot (every other video; the rest are the control)' : topic.source === 'launch' ? 'launch concept' : topic.source === 'followup' ? 'follow-up to a winner' : 'evergreen angle')}${topic.expected_twist ? ` · ${esc(topic.expected_twist)}` : ''}`,
     `<b>Source:</b> ${esc(job.facts.source_line)}`,
     esc(qaSummary(job.qa!)),
   ];

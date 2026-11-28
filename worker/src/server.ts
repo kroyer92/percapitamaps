@@ -7,6 +7,7 @@ import { applySchema, one, q } from './db.js';
 import { queue } from './lib/queue.js';
 import { deletionResult, mapFixSweep, n8nInstalled, pendingDeletions, replacementUploaded, tick as replaceTick } from './replace.js';
 import { queuePinned } from './pinned.js';
+import { queueHotSeeds } from './hot.js';
 import { pendingReschedules, rescheduleResult, rescheduleWatch } from './reschedule.js';
 import { produceOne, cleanupOldRenders, requeueTiedRejects, resendLostPreviews, redoLongHookFails, redoTruePeakFails } from './produce.js';
 import { discover } from './discover.js';
@@ -246,4 +247,6 @@ app.listen(config.port, async () => {
   await igTokenSweep().catch((e) => console.error('[ig token sweep]', e.message));
   // Pinned news Shorts (data/pinned.ts, GTA VI on 25 Nov 2026): queued at the front and made now.
   await queuePinned().catch((e) => console.error('[pinned]', e.message));
+  // The argue-about slot's first topics (data/hot.ts): queued once, made in normal turns.
+  await queueHotSeeds().catch((e) => console.error('[hot]', e.message));
 });

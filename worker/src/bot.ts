@@ -1,5 +1,6 @@
 // The Telegram bot: buttons on previews plus a few commands. Long-polls Telegram, so it
 // needs no webhook and doesn't clash with n8n.
+import { KEY_STEPS, lastScan, researchKey, setResearchKey } from './scan.js';
 import { config, isNation } from './config.js';
 import { one, q, getSetting, setSetting } from './db.js';
 import { tg, say, esc } from './telegram.js';
@@ -30,6 +31,7 @@ const HELP = [
   '/opening – how the Map Reveal opening test is going, and whether it can be read yet',
   '/nation [test|make|remove n] – Per Capita Nation: citizens, vote, the daily episode',
   '/igtoken &lt;token&gt; – put in a new Instagram token (the bot checks it, deletes your message and posts what waits)',
+  '/ytkey &lt;key&gt; – the free YouTube key for the weekly scan of winning map Shorts (checked, then your message is deleted)',
   '/status – queue, waiting approvals and next slots',
   '/help – this list',
 ].join('\n');
@@ -44,12 +46,15 @@ async function jobFromRef(ref: string): Promise<number | undefined> {
 async function status(): Promise<string> {
   const counts = await q<{ status: string; n: number }>(`SELECT status, count(*)::int AS n FROM jobs GROUP BY status ORDER BY status`);
   const ideas = await one<{ n: number }>(`SELECT count(*)::int AS n FROM topics WHERE status = 'idea'`);
+  const hot = await one<{ n: number }>(`SELECT count(*)::int AS n FROM topics WHERE status = 'idea' AND source = 'hot'`);
+  const scan = await lastScan();
   const slots = await q<{ id: number; slot_at: Date }>(`SELECT id, slot_at FROM jobs WHERE status IN ('approved','published') AND slot_at > now() ORDER BY slot_at LIMIT 5`);
   const qs = queue.status();
   return [
     '<b>Status</b>',
     `Jobs: ${counts.map((c) => `${c.status} ${c.n}`).join(', ') || 'none yet'}`,
-    `Topic ideas waiting: ${ideas?.n ?? 0}`,
+    `Topic ideas waiting: ${ideas?.n ?? 0} (argue-about slot: ${hot?.n ?? 0})`,
+    `Winner scan: ${scan?.winners?.length ? `${scan.winners.length} winning map Shorts found ${fmtIn(new Date(scan.at), config.localTz)}` : (await researchKey()) ? 'runs with the next idea search' : 'off until you send /ytkey'}`,
     `Working on: ${qs.running.join(', ') || 'nothing'}${qs.waiting.length ? ` (then ${qs.waiting.join(', ')})` : ''}`,
     `Upcoming slots: ${slots.map((s) => `#${s.id} ${fmtIn(new Date(s.slot_at), config.localTz)}`).join(', ') || 'none booked'}`,
   ].join('\n');
@@ -87,6 +92,12 @@ async function onMessage(text: string, messageId?: number): Promise<void> {
       const reply = await setIgToken(args.join(''));
       await say(reply);
       if (reply.startsWith('✅')) void instagramNow();
+      return;
+    }
+    case '/ytkey': {
+      if (messageId) await tg('deleteMessage', { chat_id: config.telegramChatId, message_id: messageId }).catch(() => undefined);
+      if (!args[0]) { await say(KEY_STEPS); return; }
+      await say(await setResearchKey(args.join('')));
       return;
     }
     case '/produce': {
@@ -210,6 +221,7 @@ export async function startBot(): Promise<void> {
       { command: 'opening', description: 'Map Reveal opening test: can it be read yet?' },
       { command: 'nation', description: 'Per Capita Nation: citizens, vote, episode' },
       { command: 'igtoken', description: 'New Instagram token: /igtoken <token>' },
+      { command: 'ytkey', description: 'YouTube key for the winner scan: /ytkey <key>' },
       { command: 'help', description: 'All commands' },
     ],
   }).catch(() => undefined);

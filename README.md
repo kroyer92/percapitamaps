@@ -47,6 +47,19 @@ n8n (schedules, YouTube credentials)          render-worker (this repo, worker/)
 
 Settings live in `app/.env` on the server (never in git). See the launch checklist for every key.
 
+## Argue-about slot and winner scan (from 28 Nov 2026)
+
+Every other Short is an "argue-about" topic (`topics.source = 'hot'`, `worker/src/hot.ts`): a
+question viewers already feel something about (their money, things they buy, their country against
+a rival), with a statement-with-a-twist title and a last line asking where the viewer's country lands.
+The other half are made as before and are the control; the Map Reveal opening test runs across both.
+The first topics are in `worker/src/data/hot.ts`; the daily idea finder adds more, borrowing the
+topics of map Shorts that are winning right now. Those come from a weekly scan (`worker/src/scan.ts`)
+that ranks the last 14 days of map and country Shorts by views over their channel's usual views. The
+scan needs a free YouTube Data API key from its own Google Cloud project (public search only, so the
+audited upload project keeps only its approved calls): send `/ytkey KEY` in Telegram, or set
+`YT_RESEARCH_KEY` in `app/.env`. Countdown is retired (`COUNTDOWN_ON=on` brings it back).
+
 ## Language model
 
 Scripts, hooks, titles, the critic and the idea finder use a hosted model when a key is set, and

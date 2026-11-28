@@ -9,6 +9,7 @@ import { score, VIRAL_VIEWS, MIN_SAMPLE, STAGE_NAME, type Grade, type IgInsights
 import { autoFollowup, hasFollowups, queueFollowup } from './followups.js';
 import type { Keyboard } from './telegram.js';
 import { isCurrent } from './changes.js';
+import { lastScan } from './scan.js';
 import { autoTune, getTune } from './tune.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -473,17 +474,17 @@ export async function writeExport(): Promise<void> {
     return;
   }
   const rows = await q(
-    `SELECT j.id, j.format, j.voice, j.hook_type, j.length_band, j.published_at, j.packaging->>'title' AS title,
+    `SELECT j.id, j.format, j.voice, j.hook_type, j.length_band, j.opening, t.source AS topic_source, j.published_at, j.packaging->>'title' AS title,
        (j.render->>'seconds')::numeric AS seconds,
        json_agg(json_build_object('win', m.win, 'views', m.views, 'engaged_views', m.engaged_views, 'avg_view_pct', m.avg_view_pct,
          'likes', m.likes, 'shares', m.shares, 'subs_gained', m.subs_gained, 'ig', m.ig, 'score', m.score) ORDER BY m.captured_at) AS snapshots
-     FROM jobs j JOIN metrics m ON m.job_id = j.id
+     FROM jobs j JOIN metrics m ON m.job_id = j.id LEFT JOIN topics t ON t.id = j.topic_id
      WHERE j.published_at > now() - interval '28 days'
-     GROUP BY j.id ORDER BY j.id`);
+     GROUP BY j.id, t.source ORDER BY j.id`);
   await fs.mkdir(dir, { recursive: true });
   const file = path.join(dir, `${config.analysisExportToken}.json`);
   const longforms = await longformExport().catch((e) => { console.error('[export longforms]', e.message); return []; });
-  await fs.writeFile(file, JSON.stringify({ generated_at: new Date().toISOString(), channel: config.channelName, tune: await getTune(), videos: rows, longforms }, null, 1));
+  await fs.writeFile(file, JSON.stringify({ generated_at: new Date().toISOString(), channel: config.channelName, tune: await getTune(), videos: rows, longforms, winner_scan: (await lastScan().catch(() => undefined)) ?? null }, null, 1));
 }
 
 // WF5's channel totals for the studio's YPP wall: subscriber count (Data API), Shorts views per day

@@ -89,20 +89,32 @@ Return JSON only:
 {"hooks":[{"type":"CONTRADICTION","text":"..."},{"type":"DIRECT_QUESTION","text":"..."},{"type":"RANK_TEASE","text":"..."},{"type":"YOU","text":"..."},{"type":"STAKES","text":"..."}],"test_first":1,"reason":"..."}`;
 }
 
-export function packagingUser(question: string, hook: string, sourceLine: string, answer?: { name: string; value: string }): string {
+// Title rules. "search": the default, a phrase people type. "hot" (the argue-about topics, hot.ts):
+// a statement with a twist, the way the map Shorts that break out are titled ("Every Country Where
+// Roblox Is Banned", "McDonald's Has NEVER Opened in These Countries").
+const TITLE_RULE = {
+  search: `"max 60 characters; contains a search phrase people type (for example 'countries ranked by', 'which country has the most'); no ALL CAPS words; no hashtags"`,
+  hot: `"max 60 characters; a statement with a twist that people want to argue with or check for their own country (for example 'The ONLY Countries Richer Than America Per Person', 'Every Country Where Tourists Outnumber Locals'); exactly one word in capitals is allowed (ONLY, EVERY, NEVER, MORE, BEATS); you may name a famous country that is NOT the answer; no question mark; no hashtags"`,
+};
+const PINNED_RULE = {
+  search: `"one question that invites a specific answer (their country, their guess), max 20 words"`,
+  hot: `"one open question people will answer with their own country or opinion (for example 'Where does your country land, and does it surprise you?'), max 20 words, no single right answer"`,
+};
+
+export function packagingUser(question: string, hook: string, sourceLine: string, answer?: { name: string; value: string }, style: 'search' | 'hot' = 'search'): string {
   const hide = answer
     ? `\nThe answer is the payoff of the video. NEVER write "${answer.name}" or its value (${answer.value}) in any field below, not even in tags. The viewer must watch to find out.`
     : '';
-  return `TASK: write the metadata. Titles are searchable phrases people actually type, not clickbait.${hide}
+  return `TASK: write the metadata. ${style === 'hot' ? 'Titles make a claim people want to check against their own country, not a dry search phrase, and never clickbait the video does not deliver.' : 'Titles are searchable phrases people actually type, not clickbait.'}${hide}
 QUESTION: ${question}
 HOOK: ${hook}
 SOURCE LINE: ${sourceLine}
 Return JSON only:
 {
- "title": "max 60 characters; contains a search phrase people type (for example 'countries ranked by', 'which country has the most'); no ALL CAPS words; no hashtags",
+ "title": ${TITLE_RULE[style]},
  "summary": "one sentence that makes people want the answer without giving it (a curiosity gap)",
  "hashtags": ["#shorts", "two more lowercase topic hashtags like #maps #geography"],
- "pinned_comment": "one question that invites a specific answer (their country, their guess), max 20 words",
+ "pinned_comment": ${PINNED_RULE[style]},
  "ig_caption": "2 short lines, no hashtags",
  "ig_hashtags": ["5 lowercase hashtags"],
  "search_tags": ["8 tags, phrases people search"]
@@ -125,3 +137,32 @@ Fail if: any number is not in FACTS; any sentence implies a cause the data doesn
 }
 
 export const FOLLOWUP_SYSTEM = ANGLE_SYSTEM;
+
+// The argue-about topic class (hot.ts, from 28 Nov 2026). Map Shorts that break out ask about
+// things viewers already have a feeling about: money in their pocket, brands and games they use,
+// their country against a rival, records their country holds. Our indicator questions ("which
+// country has the most service jobs") all stalled near 1,000 views on YouTube and Instagram alike.
+export function hotAngleUser(winners: string, datasets: string, recent: string, count = 3): string {
+  return `Map and country Shorts that are winning on YouTube right now (title | views | views compared with that channel's usual):
+${winners}
+Datasets you may use (id | title | unit | latest_year | countries | line some countries cross):
+${datasets}
+Already published or queued (do not repeat these angles or close variants):
+${recent}
+Propose ${count} angles for videos people will argue about in the comments. Rules:
+- About something the viewer already has a feeling about: money in their own pocket, things they buy or use (phones, games, food, drink, travel), their country against a rival or a famous country, a record their country could hold. Never a dry statistic for its own sake.
+- Borrow the TOPIC or the feeling of a winning Short above when one of our datasets can honestly prove it; never copy its wording.
+- Good shapes: "The ONLY countries richer than X", "Every country where tourists outnumber locals" (only with a dataset that has a line), "Which country beats the US at X", "Where an iPhone costs the most days of work".
+- Every video still ranks countries from the HIGHEST value of its dataset down and reveals the #1, so the question must be answered by the country with the highest value, in the dataset's own terms. No questions about the lowest, cheapest, least or fewest.
+- No war, religion, elections, tragedies, or mocking poor countries.
+Formats: MAP_REVEAL (world map fills in, twist revealed) or GUESS (three options, then the answer).
+Return JSON only:
+{"angles":[{
+ "dataset_id": "...",
+ "question": "the viewer-facing question or claim, max 9 words",
+ "expected_twist": "the result you expect and why people will argue about it, max 25 words",
+ "format": "MAP_REVEAL|GUESS",
+ "trend_link": "the winning Short's title it borrows from, or null",
+ "scores": {"curiosity":1,"shareability":1,"comment_bait":1,"evergreen":1}
+}]}`;
+}
