@@ -151,6 +151,23 @@ export function seriesTitle(raw: string, format: Format, n?: number): string {
   return `${title} | ${FORMAT_NAMES[format].replace('If the World Were 100 People', '100 People')} #${n}`;
 }
 
+// The last spoken line of a hot video: an open question the viewer answers with their own country.
+export function hotCloser(facts: Pick<Facts, 'threshold'>): { vo: string; on_screen: string } {
+  return facts.threshold && Number(facts.threshold.count) > 0
+    ? { vo: 'Is your country on the list? Tell me below.', on_screen: 'Is YOUR country on it?' }
+    : { vo: 'So where does your country land? Tell me below.', on_screen: 'Where does YOUR country land?' };
+}
+
+// A hot video ends by asking the viewer where their own country lands, so the comments have
+// something to answer. The line is built in code (no number, no answer), after the critic.
+export function endOnQuestion(script: Script, facts: Facts): void {
+  const last = script.beats[script.beats.length - 1];
+  if (!last) return;
+  const c = hotCloser(facts);
+  last.vo = `${last.vo.trim().replace(/([^.!?])$/, '$1.')} ${c.vo}`;
+  last.on_screen = c.on_screen;
+}
+
 export async function generateContent(opts: {
   question: string;
   format: Format;
@@ -161,6 +178,7 @@ export async function generateContent(opts: {
   opening?: Opening; // Map Reveal only: the rank strip opening (opening.ts)
   onStep?: (s: string) => void;
   recentLines?: string[][]; // spoken lines of the last few videos, so wording doesn't repeat
+  hot?: boolean; // the argue-about slot (hot.ts): twist title, open-question ending
 }): Promise<Content> {
   const { question, format, facts } = opts;
   const opening = format === 'MAP_REVEAL' ? opts.opening : undefined;
@@ -240,7 +258,7 @@ export async function generateContent(opts: {
     }
 
     onStep('Writing the title and description');
-    const pk = await chatJson<Packaging>({ temperature: 0.6, system, user: P.packagingUser(question, script.beats[0].vo, facts.source_line, spoiler) });
+    const pk = await chatJson<Packaging>({ temperature: 0.6, system, user: P.packagingUser(question, script.beats[0].vo, facts.source_line, spoiler, opts.hot ? 'hot' : 'search') });
     pk.title = (pk.title ?? question).replace(/#\S+/g, '').trim().slice(0, 70);
     pk.title = pk.title.replace(/^(\p{Ll})/u, (c) => c.toUpperCase());
     pk.hashtags = (pk.hashtags ?? ['#shorts', '#maps', '#geography']).slice(0, 3);
@@ -269,6 +287,7 @@ export async function generateContent(opts: {
     }
     if (critic.verdict === 'pass') {
       if (opening) script.opening = opening;
+      if (opts.hot) endOnQuestion(script, facts);
       return { script, originalHook, hooks, chosenHook: chosen, hookType: opening ? 'RANK_STRIP' : chosen >= 0 ? hooks[chosen].type : 'SCRIPT', packaging: pk, critic };
     }
     fixHint = critic.fix_hint || critic.issues?.map((i) => i.detail).join(' ');

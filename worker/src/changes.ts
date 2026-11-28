@@ -14,6 +14,9 @@ export const CHANGES: Change[] = [
   { at: '2026-11-06T12:00:00Z', label: 'Per Capita Nation daily census (first version)', formats: ['NATION'] },
   { at: '2026-11-12T12:00:00Z', label: 'One-text opening (headline is the spoken hook)', formats: ['COUNTDOWN', 'GUESS'] },
   { at: '2026-11-15T20:25:00Z', label: 'Map Reveal short middle, early reveal (median after the reveal)', formats: ['MAP_REVEAL'] },
+  // Every other video from here is an argue-about topic (topics.source = 'hot') with a twist title and
+  // an open-question ending; the rest are unchanged. Countdown retired. Compare hot vs the rest, not old vs new.
+  { at: '2026-11-28T19:00:00Z', label: 'Argue-about topic slot (every other video), Countdown retired', formats: ['MAP_REVEAL', 'GUESS'] },
 ];
 
 const applies = (c: Change, format: string) => c.formats === 'all' || (c.formats as string[]).includes(format);

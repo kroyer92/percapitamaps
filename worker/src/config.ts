@@ -8,6 +8,16 @@ function list(v: string | undefined): string[] {
 export const FORMAT_CODES = ['MAP_REVEAL', 'COUNTDOWN', 'THEN_NOW', 'SCALE', 'GUESS'] as const;
 export type Format = (typeof FORMAT_CODES)[number];
 
+// Countdown retired 28 Nov 2026: it held viewers worst of all formats (stayed ~31%, median 137
+// engaged views over 28 days against Map Reveal's ~48% and 459), so its turns go to the others.
+export const RETIRED_FORMATS: Format[] = (env.COUNTDOWN_ON ?? 'off').toLowerCase() === 'on' ? [] : ['COUNTDOWN'];
+
+function activeFormats(names: string[]): Format[] {
+  const known = names.filter((f): f is Format => (FORMAT_CODES as readonly string[]).includes(f));
+  const active = known.filter((f) => !RETIRED_FORMATS.includes(f));
+  return active.length ? active : ['MAP_REVEAL'];
+}
+
 export const config = {
   port: Number(env.PORT ?? 8080),
   telegramToken: env.TELEGRAM_BOT_TOKEN ?? '',
@@ -46,9 +56,12 @@ export const config = {
   voiceB: env.VOICE_B || 'af_heart',
   voice: env.VOICE ?? '',
   voiceRotation: env.VOICE_ROTATION ?? '',
-  // A format listed twice gets double weight.
-  formats: list(env.FORMATS || FORMAT_CODES.join(',')).filter((f): f is Format =>
-    (FORMAT_CODES as readonly string[]).includes(f)),
+  // A format listed twice gets double weight. A retired format (RETIRED_FORMATS) is left out even
+  // when FORMATS in .env still lists it; COUNTDOWN_ON=on brings Countdown back.
+  formats: activeFormats(list(env.FORMATS || FORMAT_CODES.join(','))),
+  // The weekly "what is winning" scan (scan.ts): a plain YouTube Data API key from its own free
+  // Google Cloud project (public search only). /ytkey in Telegram stores one without a restart.
+  ytResearchKey: env.YT_RESEARCH_KEY ?? '',
   lengthTest: list(env.LENGTH_TEST),
   hookTest: list(env.HOOK_TEST),
   seriesNaming: (env.SERIES_NAMING ?? 'off').toLowerCase() === 'on',

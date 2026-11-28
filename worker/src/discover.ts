@@ -7,6 +7,7 @@ import * as P from './prompts.js';
 import { enabledDatasets, type DatasetRow } from './datasets.js';
 import { working } from './activity.js';
 import { HIGH_END } from './data/catalog.js';
+import { discoverHot } from './hot.js';
 
 const UA = 'PerCapitaMapsStudio/1.0 (private tool)';
 const SEEDS = [
@@ -29,7 +30,7 @@ export function lowEndProblem(question: string, datasetId?: string): string | un
 
 // Asks the model whether each dataset's #1 really answers its question. Angles it says no to are
 // dropped; if the call fails, all of them are kept (the word check in insertTopics still runs).
-async function fitsData(angles: Angle[], datasets: DatasetRow[]): Promise<{ keep: Angle[]; skipped: string[] }> {
+export async function fitsData(angles: Angle[], datasets: DatasetRow[]): Promise<{ keep: Angle[]; skipped: string[] }> {
   const byId = new Map(datasets.map((d) => [d.id, d]));
   const rows = angles.map((a) => ({ a, ds: byId.get(a.dataset_id) })).filter((r) => r.ds && r.a.question);
   if (!rows.length) return { keep: angles, skipped: [] };
@@ -111,7 +112,7 @@ export function angleHash(question: string): string {
   return crypto.createHash('sha1').update(norm).digest('hex').slice(0, 16);
 }
 
-export async function insertTopics(angles: Angle[], datasets: DatasetRow[], source: 'discover' | 'followup' | 'launch', basePriority = 0): Promise<{ inserted: number; skipped: string[] }> {
+export async function insertTopics(angles: Angle[], datasets: DatasetRow[], source: 'discover' | 'followup' | 'launch' | 'hot', basePriority = 0): Promise<{ inserted: number; skipped: string[] }> {
   const byId = new Map(datasets.map((d) => [d.id, d]));
   const skipped: string[] = [];
   let inserted = 0;
@@ -155,7 +156,7 @@ function datasetTable(rows: DatasetRow[]): string {
   }).join('\n');
 }
 
-async function recentTitles(): Promise<string> {
+export async function recentTitles(): Promise<string> {
   const rows = await q<{ question: string }>(`SELECT question FROM topics WHERE created_at > now() - interval '365 days' ORDER BY created_at DESC LIMIT 120`);
   return rows.map((r) => `- ${r.question}`).join('\n') || '(none yet)';
 }
@@ -174,8 +175,11 @@ export async function discover(): Promise<{ signals: number; inserted: number; s
   const fit = await fitsData(res.angles ?? [], datasets);
   working('scout', `Checking ${fit.keep.length} ideas against a year of topics for repeats`);
   const out = await insertTopics(fit.keep, datasets, 'discover');
+  // The argue-about slot's ideas (hot.ts), from the weekly scan of winning map Shorts.
+  working('scout', 'Looking for topics people argue about, from the map Shorts winning this week');
+  const hot = await discoverHot().catch((e) => { console.error('[discover hot]', e.message); return { inserted: 0, skipped: [] as string[] }; });
   await unloadModels();
-  return { signals: signals.length, inserted: out.inserted, skipped: [...fit.skipped, ...out.skipped] };
+  return { signals: signals.length, inserted: out.inserted + hot.inserted, skipped: [...fit.skipped, ...out.skipped, ...hot.skipped] };
 }
 
 // /followup: two related videos in the same format, from nearby datasets.
